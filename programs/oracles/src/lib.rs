@@ -3,9 +3,9 @@ use anchor_lang::solana_program::clock::Clock;
 use switchboard_v2::AggregatorAccountData;
 
 pub mod price_oracle;
-use price_oracle::{AssetType, PriceOracle, PriceOracleHeader, PriceOracleData};
+use price_oracle::{AssetType, AssetTypeWrapper, PriceOracle, PriceOracleHeader, PriceOracleData};
 
-declare_id!("4fku27SVF5v7ee7qKGzA8nteFqFmow9HNw44JaV8NCaW");
+declare_id!("HHtFugJrtBCw3t3m96mDYFqtEHLZdhdiwSxrNTCyFRm7");
 
 #[program]
 pub mod oracles {

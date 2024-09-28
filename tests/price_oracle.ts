@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { MySolanaProgram } from "../target/types/flexxcash_oracle";
+import { Oracles } from "../target/types/oracles";
 import { PublicKey } from '@solana/web3.js';
 import { assert } from "chai";
 
@@ -8,17 +8,24 @@ describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.MySolanaProgram as Program<MySolanaProgram>;
+  const program = anchor.workspace.Oracles as Program<Oracles>;
 
-  let priceOraclePda: PublicKey;
+  let priceOracleHeaderPda: PublicKey;
+  let priceOracleDataPda: PublicKey;
   let oracleFeed: PublicKey;
 
   before(async () => {
-    const [pda] = await PublicKey.findProgramAddress(
-      [Buffer.from("price_oracle")],
+    const [headerPda] = await PublicKey.findProgramAddress(
+      [Buffer.from("price_oracle_header")],
       program.programId
     );
-    priceOraclePda = pda;
+    priceOracleHeaderPda = headerPda;
+
+    const [dataPda] = await PublicKey.findProgramAddress(
+      [Buffer.from("price_oracle_data")],
+      program.programId
+    );
+    priceOracleDataPda = dataPda;
 
     // 使用 JupSOL 的 feed address 作為示例
     oracleFeed = new PublicKey("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA");
@@ -27,50 +34,60 @@ describe("price_oracle", () => {
   it("Initializes the price oracle", async () => {
     await program.methods.initialize()
       .accounts({
-        priceOracle: priceOraclePda,
-        user: provider.wallet.publicKey,
+        header: priceOracleHeaderPda,
+        data: priceOracleDataPda,
+        authority: provider.wallet.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
-    const account = await program.account.priceOracle.fetch(priceOraclePda);
-    assert.isNotNull(account);
-    assert.isEmpty(account.prices);
-    assert.isEmpty(account.apys);
+    const headerAccount = await program.account.priceOracleHeader.fetch(priceOracleHeaderPda);
+    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
+    assert.isNotNull(headerAccount);
+    assert.isNotNull(dataAccount);
+    assert.isEmpty(dataAccount.priceData);
+    assert.isEmpty(dataAccount.assetTypes);
   });
 
   it("Updates price for JupSOL", async () => {
     await program.methods.updatePrice({ jupSol: {} })
       .accounts({
-        priceOracle: priceOraclePda,
+        header: priceOracleHeaderPda,
+        data: priceOracleDataPda,
         oracleFeed: oracleFeed,
       })
       .rpc();
 
-    const account = await program.account.priceOracle.fetch(priceOraclePda);
-    const jupSolPrice = account.prices.find(([assetType]) => 'jupSol' in assetType);
+    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
+    const jupSolPrice = dataAccount.priceData.find((_, index) => 
+      'jupSol' in (dataAccount.assetTypes[index] as { [key: string]: any })
+    );
     assert.isNotNull(jupSolPrice);
-    assert.isTrue(jupSolPrice[1].price > 0);
+    assert.isTrue(jupSolPrice.price > 0);
   });
 
   it("Updates APY for JupSOL", async () => {
     await program.methods.updateApy({ jupSol: {} })
       .accounts({
-        priceOracle: priceOraclePda,
+        header: priceOracleHeaderPda,
+        data: priceOracleDataPda,
         oracleFeed: oracleFeed,
       })
       .rpc();
 
-    const account = await program.account.priceOracle.fetch(priceOraclePda);
-    const jupSolApy = account.apys.find(([assetType]) => 'jupSol' in assetType);
+    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
+    const jupSolApy = dataAccount.priceData.find((_, index) => 
+      'jupSol' in (dataAccount.assetTypes[index] as { [key: string]: any })
+    );
     assert.isNotNull(jupSolApy);
-    assert.isTrue(jupSolApy[1].apy > 0);
+    assert.isTrue(jupSolApy.apy > 0);
   });
 
   it("Gets current price for JupSOL", async () => {
     const tx = await program.methods.getCurrentPrice({ jupSol: {} })
       .accounts({
-        priceOracle: priceOraclePda,
+        header: priceOracleHeaderPda,
+        data: priceOracleDataPda,
       })
       .rpc();
 
@@ -81,7 +98,8 @@ describe("price_oracle", () => {
   it("Gets current APY for JupSOL", async () => {
     const tx = await program.methods.getCurrentApy({ jupSol: {} })
       .accounts({
-        priceOracle: priceOraclePda,
+        header: priceOracleHeaderPda,
+        data: priceOracleDataPda,
       })
       .rpc();
 
@@ -93,20 +111,22 @@ describe("price_oracle", () => {
     try {
       await program.methods.updatePrice({ jupSol: {} })
         .accounts({
-          priceOracle: priceOraclePda,
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
           oracleFeed: oracleFeed,
         })
         .rpc();
       assert.fail("Should have thrown an error");
     } catch (error) {
-      assert.include(error.message, "Price update is too frequent");
+      assert.include((error as Error).message, "Price update is too frequent");
     }
   });
 
   it("Gets SOL price", async () => {
     const tx = await program.methods.getSolPrice()
       .accounts({
-        priceOracle: priceOraclePda,
+        header: priceOracleHeaderPda,
+        data: priceOracleDataPda,
       })
       .rpc();
 
