@@ -18,7 +18,9 @@ flexxcash_bnpl/
 │   ├── flexxcash_oracle.ts
 │   └── price_oracle.ts
 │
-└── Anchor.toml
+├── Anchor.toml
+├── README.md
+└── rebuild.sh
 ```
 
 ## Dependencies
@@ -294,19 +296,52 @@ This file implements the core logic of the price oracle.
 4. Run `anchor build` in the project root to build the program.
 5. Run `anchor test` to execute all test cases.
 
+## Troubleshooting
+
+If you encounter errors related to missing Anchor macros or unable to find program files, you can use the provided `rebuild.sh` script to update Anchor, clean the project, and rebuild:
+
+1. Make the script executable:
+   ```
+   chmod +x rebuild.sh
+   ```
+
+2. Run the script:
+   ```
+   ./rebuild.sh
+   ```
+
+This script will perform the following actions:
+- Update Anchor to the latest version
+- Clean the project
+- Rebuild the project
+
+If you still encounter issues after running the script, please refer to the following additional troubleshooting steps:
+
+1. Ensure your Solana CLI is on the correct network (localnet for testing):
+   ```
+   solana config set --url localhost
+   ```
+
+2. Check the Solana and Anchor versions:
+   ```
+   solana --version
+   anchor --version
+   ```
+   Make sure they are compatible with each other and with your project.
+
+3. If problems persist, try manually deleting the `target` directory and `.anchor` directory (if it exists) and rebuilding:
+   ```
+   rm -rf target
+   rm -rf .anchor
+   anchor build
+   ```
+
 ## Notes
 
 - This program uses the Switchboard oracle to get real-time price and APY data.
 - USDC price is fixed at $1.00.
 - There's an emergency stop mechanism to prevent updates in case of abnormal conditions.
 - Price changes exceeding 20% will trigger an error to prevent abnormal fluctuations.
-
-## Troubleshooting
-
-If you encounter a "Unable to read keypair file" error:
-1. Ensure that your Solana keypair file exists and is correctly set up.
-2. Check that you have the necessary permissions to read the keypair file.
-3. Verify that your Solana CLI is correctly configured to use the right keypair.
 
 ## Contributing
 

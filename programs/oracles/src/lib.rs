@@ -5,10 +5,10 @@ use switchboard_v2::AggregatorAccountData;
 pub mod price_oracle;
 use price_oracle::{AssetType, PriceOracle, PriceOracleHeader, PriceOracleData};
 
-declare_id!("11111111111111111111111111111111");
+declare_id!("4fku27SVF5v7ee7qKGzA8nteFqFmow9HNw44JaV8NCaW");
 
 #[program]
-pub mod flexxcash_oracle {
+pub mod oracles {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {

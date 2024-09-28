@@ -1,5 +1,5 @@
 [package]
-name = "flexxcash_oracle"
+name = "oracles"
 version = "0.1.0"
 edition = "2021"
 
