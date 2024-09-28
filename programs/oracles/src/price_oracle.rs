@@ -14,17 +14,27 @@ pub enum AssetType {
     SOL,
 }
 
-impl AssetType {
-    pub fn get_feed_address(&self) -> Result<Pubkey> {
-        match self {
-            AssetType::JupSOL => Pubkey::try_from("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA"),
-            AssetType::MSOL => Pubkey::try_from("mU2inw8URG5s97X8xFhY9y2VsLZSPrwqY3eky4DjEQQ"),
-            AssetType::BSOL => Pubkey::try_from("2CNMT1r5mWyWTYYD23UoV9ueq2cHpj2qvZKUwrP5LftU"),
-            AssetType::HSOL => Pubkey::try_from("4U1ofakLouLjVHXxMXXwNDkz3eUUSMXMqTyeC16Trpdf"),
-            AssetType::JitoSOL => Pubkey::try_from("3UF281FMHbuXKsfqGQKQVExexnvMsHMGoGoo917rVf3g"),
-            AssetType::VSOL => Pubkey::try_from("2e2WhmSbWvNR94tXzK1caBEX1uCedXns6xVXfqePctJq"),
-            AssetType::SOL => Pubkey::try_from("98tVEYkSyG7Di424o98ETFMTxocb5bCWARAeuUF1haL4"),
-        }.map_err(|_| error!(OracleError::InvalidAssetType))
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, PartialEq)]
+pub struct AssetTypeWrapper(u8);
+
+impl From<AssetType> for AssetTypeWrapper {
+    fn from(asset_type: AssetType) -> Self {
+        AssetTypeWrapper(asset_type as u8)
+    }
+}
+
+impl From<AssetTypeWrapper> for AssetType {
+    fn from(wrapper: AssetTypeWrapper) -> Self {
+        match wrapper.0 {
+            0 => AssetType::JupSOL,
+            1 => AssetType::MSOL,
+            2 => AssetType::BSOL,
+            3 => AssetType::HSOL,
+            4 => AssetType::JitoSOL,
+            5 => AssetType::VSOL,
+            6 => AssetType::SOL,
+            _ => panic!("Invalid AssetType"),
+        }
     }
 }
 
@@ -33,127 +43,157 @@ pub struct PriceData {
     pub price: f64,
     pub last_price: f64,
     pub last_update_time: i64,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
-pub struct ApyData {
     pub apy: f64,
-    pub last_update_time: i64,
 }
 
 #[account]
-pub struct PriceOracle {
-    pub prices: Vec<(AssetType, PriceData)>,
-    pub apys: Vec<(AssetType, ApyData)>,
+pub struct PriceOracleHeader {
+    pub asset_count: u8,
     pub last_global_update: i64,
     pub emergency_stop: bool,
+    pub authority: Pubkey,
 }
 
-impl PriceOracle {
-    pub fn initialize(&mut self) -> Result<()> {
-        self.prices = Vec::new();
-        self.apys = Vec::new();
-        self.last_global_update = 0;
-        self.emergency_stop = false;
+#[account]
+pub struct PriceOracleData {
+    pub price_data: Vec<PriceData>,
+    pub asset_types: Vec<AssetTypeWrapper>,
+}
+
+pub struct PriceOracle<'info> {
+    pub header: Account<'info, PriceOracleHeader>,
+    pub data: Account<'info, PriceOracleData>,
+}
+
+impl<'info> PriceOracle<'info> {
+    pub const MAX_ASSETS: usize = 10;
+
+    pub fn initialize(header: &mut Account<PriceOracleHeader>, data: &mut Account<PriceOracleData>, authority: &Signer) -> Result<()> {
+        header.asset_count = 0;
+        header.last_global_update = 0;
+        header.emergency_stop = false;
+        header.authority = authority.key();
+
+        data.price_data = Vec::new();
+        data.asset_types = Vec::new();
+
         Ok(())
     }
 
     pub fn update_price(&mut self, feed: &AccountLoader<AggregatorAccountData>, asset_type: AssetType, clock: &Clock) -> Result<()> {
-        if self.emergency_stop {
+        if self.header.emergency_stop {
             return Err(error!(OracleError::EmergencyStop));
         }
 
         let new_price = Self::get_price_from_feed(feed)?;
         let current_time = clock.unix_timestamp;
 
-        if let Some(price_data) = self.prices.iter_mut().find(|(at, _)| *at == asset_type) {
-            let price_change = (new_price - price_data.1.price).abs() / price_data.1.price;
+        let index = self.find_or_add_asset(asset_type)?;
+        if let Some(price_data) = self.data.price_data.get_mut(index) {
+            let price_change = (new_price - price_data.price).abs() / price_data.price;
             if price_change > 0.2 {
-                self.emergency_stop = true;
+                self.header.emergency_stop = true;
                 return Err(error!(OracleError::PriceChangeExceedsLimit));
             }
 
-            price_data.1.last_price = price_data.1.price;
-            price_data.1.price = new_price;
-            price_data.1.last_update_time = current_time;
+            price_data.last_price = price_data.price;
+            price_data.price = new_price;
+            price_data.last_update_time = current_time;
         } else {
-            self.prices.push((asset_type, PriceData { price: new_price, last_price: new_price, last_update_time: current_time }));
+            return Err(error!(OracleError::InvalidIndex));
         }
 
-        self.last_global_update = current_time;
+        self.header.last_global_update = current_time;
         Ok(())
     }
 
     pub fn update_apy(&mut self, feed: &AccountLoader<AggregatorAccountData>, asset_type: AssetType, clock: &Clock) -> Result<()> {
-        if self.emergency_stop {
+        if self.header.emergency_stop {
             return Err(error!(OracleError::EmergencyStop));
         }
 
         let apy = Self::get_apy_from_feed(feed)?;
         let current_time = clock.unix_timestamp;
 
-        if let Some(apy_data) = self.apys.iter_mut().find(|(at, _)| *at == asset_type) {
-            apy_data.1.apy = apy;
-            apy_data.1.last_update_time = current_time;
+        let index = self.find_or_add_asset(asset_type)?;
+        if let Some(price_data) = self.data.price_data.get_mut(index) {
+            price_data.apy = apy;
+            price_data.last_update_time = current_time;
         } else {
-            self.apys.push((asset_type, ApyData { apy, last_update_time: current_time }));
+            return Err(error!(OracleError::InvalidIndex));
         }
 
-        self.last_global_update = current_time;
+        self.header.last_global_update = current_time;
         Ok(())
     }
 
     pub fn get_current_price(&self, asset_type: AssetType) -> Result<f64> {
-        self.prices.iter()
-            .find(|(at, _)| *at == asset_type)
-            .map(|(_, price_data)| price_data.price)
+        let index = self.find_asset(asset_type)?;
+        self.data.price_data.get(index)
+            .map(|price_data| price_data.price)
             .ok_or_else(|| error!(OracleError::PriceNotAvailable))
     }
 
     pub fn get_last_price(&self, asset_type: AssetType) -> Result<f64> {
-        self.prices.iter()
-            .find(|(at, _)| *at == asset_type)
-            .map(|(_, price_data)| price_data.last_price)
+        let index = self.find_asset(asset_type)?;
+        self.data.price_data.get(index)
+            .map(|price_data| price_data.last_price)
             .ok_or_else(|| error!(OracleError::PriceNotAvailable))
     }
 
     pub fn get_current_apy(&self, asset_type: AssetType) -> Result<f64> {
-        self.apys.iter()
-            .find(|(at, _)| *at == asset_type)
-            .map(|(_, apy_data)| apy_data.apy)
+        let index = self.find_asset(asset_type)?;
+        self.data.price_data.get(index)
+            .map(|price_data| price_data.apy)
             .ok_or_else(|| error!(OracleError::ApyNotAvailable))
     }
 
     pub fn last_update_time(&self, asset_type: AssetType) -> Result<i64> {
-        self.prices.iter()
-            .find(|(at, _)| *at == asset_type)
-            .map(|(_, price_data)| price_data.last_update_time)
-            .ok_or_else(|| error!(OracleError::PriceNotAvailable))
+        let index = self.find_asset(asset_type)?;
+        self.data.price_data.get(index)
+            .map(|price_data| price_data.last_update_time)
+            .ok_or_else(|| error!(OracleError::DataNotAvailable))
     }
 
     pub fn is_emergency_stopped(&self) -> bool {
-        self.emergency_stop
+        self.header.emergency_stop
     }
 
     pub fn set_emergency_stop(&mut self, stop: bool) {
-        self.emergency_stop = stop;
+        self.header.emergency_stop = stop;
+    }
+
+    fn find_asset(&self, asset_type: AssetType) -> Result<usize> {
+        let wrapper: AssetTypeWrapper = asset_type.into();
+        self.data.asset_types.iter()
+            .position(|&at| at == wrapper)
+            .ok_or_else(|| error!(OracleError::AssetNotFound))
+    }
+
+    fn find_or_add_asset(&mut self, asset_type: AssetType) -> Result<usize> {
+        if let Ok(index) = self.find_asset(asset_type) {
+            Ok(index)
+        } else if (self.header.asset_count as usize) < Self::MAX_ASSETS {
+            let index = self.header.asset_count as usize;
+            self.data.asset_types.push(asset_type.into());
+            self.data.price_data.push(PriceData::default());
+            self.header.asset_count += 1;
+            Ok(index)
+        } else {
+            Err(error!(OracleError::MaxAssetsReached))
+        }
     }
 
     fn get_price_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64> {
         let feed_data = feed.load()?;
 
-        // 檢查 feed 所有者
         if feed.to_account_info().owner != &SWITCHBOARD_PROGRAM_ID {
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        // 獲取結果
         let decimal: f64 = feed_data.get_result()?.try_into()?;
 
-        // 檢查 feed 是否在過去 5 分鐘內更新
         feed_data.check_staleness(clock::Clock::get().unwrap().unix_timestamp, 300)?;
-
-        // 檢查 feed 是否超出 +/- $0.80 的置信區間
         feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(0.80))?;
 
         Ok(decimal)
@@ -162,18 +202,13 @@ impl PriceOracle {
     fn get_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64> {
         let feed_data = feed.load()?;
 
-        // 檢查 feed 所有者
         if feed.to_account_info().owner != &SWITCHBOARD_PROGRAM_ID {
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        // 獲取結果
         let decimal: f64 = feed_data.get_result()?.try_into()?;
 
-        // 檢查 feed 是否在過去 5 分鐘內更新
         feed_data.check_staleness(clock::Clock::get().unwrap().unix_timestamp, 300)?;
-
-        // 檢查 feed 是否超出 +/- 0.1% 的置信區間
         feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(0.001))?;
 
         Ok(decimal)
@@ -210,4 +245,10 @@ pub enum OracleError {
     StaleData,
     #[msg("Exceeds confidence interval")]
     ExceedsConfidenceInterval,
+    #[msg("Maximum number of assets reached")]
+    MaxAssetsReached,
+    #[msg("Asset not found")]
+    AssetNotFound,
+    #[msg("Invalid index")]
+    InvalidIndex,
 }

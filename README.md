@@ -14,9 +14,11 @@ flexxcash_bnpl/
 │           ├── lib.rs
 │           └── price_oracle.rs
 │
-└── tests/
-    ├── flexxcash_oracle.ts
-    └── price_oracle.ts
+├── tests/
+│   ├── flexxcash_oracle.ts
+│   └── price_oracle.ts
+│
+└── Anchor.toml
 ```
 
 ## Dependencies
@@ -283,12 +285,14 @@ This file implements the core logic of the price oracle.
 - `StaleData` - Data is stale.
 - `ExceedsConfidenceInterval` - Data exceeds the confidence interval.
 
+
 ## Usage
 
 1. Ensure Rust and Solana CLI are installed.
 2. Clone this repository.
-3. Run `anchor build` in the project root to build the program.
-4. Run `anchor test` to execute all test cases.
+3. Make sure your Solana keypair is correctly set up and accessible.
+4. Run `anchor build` in the project root to build the program.
+5. Run `anchor test` to execute all test cases.
 
 ## Notes
 
@@ -296,6 +300,13 @@ This file implements the core logic of the price oracle.
 - USDC price is fixed at $1.00.
 - There's an emergency stop mechanism to prevent updates in case of abnormal conditions.
 - Price changes exceeding 20% will trigger an error to prevent abnormal fluctuations.
+
+## Troubleshooting
+
+If you encounter a "Unable to read keypair file" error:
+1. Ensure that your Solana keypair file exists and is correctly set up.
+2. Check that you have the necessary permissions to read the keypair file.
+3. Verify that your Solana CLI is correctly configured to use the right keypair.
 
 ## Contributing
 
