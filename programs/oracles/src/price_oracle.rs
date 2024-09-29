@@ -251,4 +251,6 @@ pub enum OracleError {
     AssetNotFound,
     #[msg("Invalid index")]
     InvalidIndex,
+    #[msg("Clock unavailable")]
+    ClockUnavailable,
 }

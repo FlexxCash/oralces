@@ -343,6 +343,36 @@ If you still encounter issues after running the script, please refer to the foll
 - There's an emergency stop mechanism to prevent updates in case of abnormal conditions.
 - Price changes exceeding 20% will trigger an error to prevent abnormal fluctuations.
 
+
+## Running Tests
+
+To run the tests for this project, follow these steps:
+
+1. Ensure you have Solana CLI tools and Anchor installed on your system.
+
+2. Navigate to the project root directory (flexxcash_bnpl) in your terminal.
+
+3. Build the program:
+   ```
+   anchor build
+   ```
+
+4. Deploy the program to a local test validator:
+   ```
+   anchor deploy
+   ```
+
+5. Run the tests:
+   ```
+   anchor test
+   ```
+
+This will execute all the tests defined in the `tests/price_oracle.ts` file.
+
+Note: Make sure you have a local Solana test validator running before executing the tests. If you encounter any issues, refer to the Troubleshooting section in this README.
+
+[... 保留原有內容 ...]
+
 ## Contributing
 
 Pull Requests are welcome to improve this project. Please ensure all tests pass before submitting.

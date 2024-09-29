@@ -1,119 +1,139 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program, AnchorProvider, Idl } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { assert } from "chai";
-
-// 定義自定義接口
-interface PriceOracleProgram extends Program<Idl> {
-  account: {
-    priceOracleHeader: any;
-    priceOracleData: any;
-  };
-}
 
 describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  // 手動初始化程序
-  const programId = new anchor.web3.PublicKey("AtguUUsGDXry7onmb7QqDK4DLwquRkQPsXX1CJTjZsUy");
-  const idl = require("../target/idl/oracles.json") as Idl;
-  const program = new anchor.Program(idl, programId, provider) as PriceOracleProgram;
+  // 使用 Anchor.toml 中定義的程序 ID
+  const programId = new anchor.web3.PublicKey("2xR9zZtS5TKuJfziwyTuL49We28aXYMuC7v9b3kY8kkM");
+  const program = anchor.workspace.Oracles as Program<any>;
 
   let priceOracleHeaderPda: anchor.web3.PublicKey;
   let priceOracleDataPda: anchor.web3.PublicKey;
   let oracleFeed: anchor.web3.PublicKey;
 
   before(async () => {
-    const [headerPda] = await anchor.web3.PublicKey.findProgramAddress(
-      [Buffer.from("price_oracle_header")],
-      program.programId
-    );
-    priceOracleHeaderPda = headerPda;
+    try {
+      const [headerPda] = await anchor.web3.PublicKey.findProgramAddress(
+        [Buffer.from("price_oracle_header")],
+        programId
+      );
+      priceOracleHeaderPda = headerPda;
 
-    const [dataPda] = await anchor.web3.PublicKey.findProgramAddress(
-      [Buffer.from("price_oracle_data")],
-      program.programId
-    );
-    priceOracleDataPda = dataPda;
+      const [dataPda] = await anchor.web3.PublicKey.findProgramAddress(
+        [Buffer.from("price_oracle_data")],
+        programId
+      );
+      priceOracleDataPda = dataPda;
 
-    // 使用 JupSOL 的 feed address 作為示例
-    oracleFeed = new anchor.web3.PublicKey("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA");
+      oracleFeed = new anchor.web3.PublicKey("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA");
+    } catch (error) {
+      console.error("Error in before hook:", error);
+      throw error;
+    }
   });
 
   it("Initializes the price oracle", async () => {
-    await program.methods.initialize()
-      .accounts({
-        header: priceOracleHeaderPda,
-        data: priceOracleDataPda,
-        authority: provider.wallet.publicKey,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc();
+    try {
+      await program.methods.initialize()
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+          authority: provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
 
-    const headerAccount = await program.account.priceOracleHeader.fetch(priceOracleHeaderPda);
-    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
-    assert.isNotNull(headerAccount);
-    assert.isNotNull(dataAccount);
-    assert.isEmpty(dataAccount.priceData);
-    assert.isEmpty(dataAccount.assetTypes);
+      const headerAccount = await (program.account as any)['priceOracleHeader'].fetch(priceOracleHeaderPda);
+      const dataAccount = await (program.account as any)['priceOracleData'].fetch(priceOracleDataPda);
+      assert.isNotNull(headerAccount, "Header account should not be null");
+      assert.isNotNull(dataAccount, "Data account should not be null");
+      assert.isEmpty(dataAccount.priceData, "Price data should be empty");
+      assert.isEmpty(dataAccount.assetTypes, "Asset types should be empty");
+    } catch (error) {
+      console.error("Error initializing price oracle:", error);
+      throw error;
+    }
   });
 
   it("Updates price for JupSOL", async () => {
-    await program.methods.updatePrice({ jupSol: {} })
-      .accounts({
-        header: priceOracleHeaderPda,
-        data: priceOracleDataPda,
-        oracleFeed: oracleFeed,
-      })
-      .rpc();
+    try {
+      await program.methods.updatePrice({ jupSol: {} })
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+          oracleFeed: oracleFeed,
+        })
+        .rpc();
 
-    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
-    const jupSolPrice = dataAccount.priceData.find((_, index) => 
-      'jupSol' in (dataAccount.assetTypes[index] as { [key: string]: any })
-    );
-    assert.isNotNull(jupSolPrice);
-    assert.isTrue(jupSolPrice.price > 0);
+      const dataAccount = await (program.account as any)['priceOracleData'].fetch(priceOracleDataPda);
+      const jupSolPrice = dataAccount.priceData.find((_, index: number) => 
+        'jupSol' in (dataAccount.assetTypes[index] as any)
+      );
+      assert.isNotNull(jupSolPrice, "JupSOL price should not be null");
+      assert.isTrue(jupSolPrice.price > 0, "JupSOL price should be greater than 0");
+    } catch (error) {
+      console.error("Error updating price for JupSOL:", error);
+      throw error;
+    }
   });
 
   it("Updates APY for JupSOL", async () => {
-    await program.methods.updateApy({ jupSol: {} })
-      .accounts({
-        header: priceOracleHeaderPda,
-        data: priceOracleDataPda,
-        oracleFeed: oracleFeed,
-      })
-      .rpc();
+    try {
+      await program.methods.updateApy({ jupSol: {} })
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+          oracleFeed: oracleFeed,
+        })
+        .rpc();
 
-    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
-    const jupSolApy = dataAccount.priceData.find((_, index) => 
-      'jupSol' in (dataAccount.assetTypes[index] as { [key: string]: any })
-    );
-    assert.isNotNull(jupSolApy);
-    assert.isTrue(jupSolApy.apy > 0);
+      const dataAccount = await (program.account as any)['priceOracleData'].fetch(priceOracleDataPda);
+      const jupSolApy = dataAccount.priceData.find((_, index: number) => 
+        'jupSol' in (dataAccount.assetTypes[index] as any)
+      );
+      assert.isNotNull(jupSolApy, "JupSOL APY should not be null");
+      assert.isTrue(jupSolApy.apy > 0, "JupSOL APY should be greater than 0");
+    } catch (error) {
+      console.error("Error updating APY for JupSOL:", error);
+      throw error;
+    }
   });
 
   it("Gets current price for JupSOL", async () => {
-    const tx = await program.methods.getCurrentPrice({ jupSol: {} })
-      .accounts({
-        header: priceOracleHeaderPda,
-        data: priceOracleDataPda,
-      })
-      .rpc();
+    try {
+      const tx = await program.methods.getCurrentPrice({ jupSol: {} })
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+        })
+        .rpc();
 
-    const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
-    assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current price for JupSOL:")));
+      const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
+      assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current price for JupSOL:")), "Transaction logs should include current price for JupSOL");
+    } catch (error) {
+      console.error("Error getting current price for JupSOL:", error);
+      throw error;
+    }
   });
 
   it("Gets current APY for JupSOL", async () => {
-    const tx = await program.methods.getCurrentApy({ jupSol: {} })
-      .accounts({
-        header: priceOracleHeaderPda,
-        data: priceOracleDataPda,
-      })
-      .rpc();
+    try {
+      const tx = await program.methods.getCurrentApy({ jupSol: {} })
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+        })
+        .rpc();
 
-    const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
-    assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current APY for JupSOL:")));
+      const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
+      assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current APY for JupSOL:")), "Transaction logs should include current APY for JupSOL");
+    } catch (error) {
+      console.error("Error getting current APY for JupSOL:", error);
+      throw error;
+    }
   });
 
   it("Fails to update price too frequently", async () => {
@@ -127,27 +147,37 @@ describe("price_oracle", () => {
         .rpc();
       assert.fail("Should have thrown an error");
     } catch (error) {
-      assert.include((error as Error).message, "Price update is too frequent");
+      assert.include((error as Error).message, "Price update is too frequent", "Error message should indicate that price update is too frequent");
     }
   });
 
   it("Gets SOL price", async () => {
-    const tx = await program.methods.getSolPrice()
-      .accounts({
-        header: priceOracleHeaderPda,
-        data: priceOracleDataPda,
-      })
-      .rpc();
+    try {
+      const tx = await program.methods.getSolPrice()
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+        })
+        .rpc();
 
-    const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
-    assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current SOL price:")));
+      const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
+      assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current SOL price:")), "Transaction logs should include current SOL price");
+    } catch (error) {
+      console.error("Error getting SOL price:", error);
+      throw error;
+    }
   });
 
   it("Gets USDC price", async () => {
-    const tx = await program.methods.getUsdcPrice()
-      .rpc();
+    try {
+      const tx = await program.methods.getUsdcPrice()
+        .rpc();
 
-    const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
-    assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current USDC price: $1.00")));
+      const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
+      assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current USDC price: $1.00")), "Transaction logs should include current USDC price");
+    } catch (error) {
+      console.error("Error getting USDC price:", error);
+      throw error;
+    }
   });
 });

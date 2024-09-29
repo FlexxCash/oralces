@@ -1,11 +1,12 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
+use anchor_lang::solana_program::log::sol_log_compute_units;
 use switchboard_v2::AggregatorAccountData;
 
 pub mod price_oracle;
-use price_oracle::{AssetType, AssetTypeWrapper, PriceOracle, PriceOracleHeader, PriceOracleData};
+use price_oracle::{AssetType, AssetTypeWrapper, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError};
 
-declare_id!("AtguUUsGDXry7onmb7QqDK4DLwquRkQPsXX1CJTjZsUy");
+declare_id!("fkuu5nF9RFtEuJGzVeqcbPf8x9C7gwJYkiaoWzkB7Tm");
 
 #[program]
 pub mod oracles {
@@ -18,28 +19,56 @@ pub mod oracles {
     }
 
     pub fn update_price(ctx: Context<UpdatePrice>, asset_type: AssetType) -> Result<()> {
-        let clock = Clock::get()?;
+        sol_log_compute_units();
+        msg!("Updating price for {:?}", asset_type);
+
+        let clock = Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?;
         let mut price_oracle = PriceOracle {
             header: ctx.accounts.header.clone(),
             data: ctx.accounts.data.clone(),
         };
-        price_oracle.update_price(&ctx.accounts.oracle_feed, asset_type, &clock)?;
 
-        let new_price = price_oracle.get_current_price(asset_type)?;
+        price_oracle.update_price(&ctx.accounts.oracle_feed, asset_type, &clock)
+            .map_err(|e| {
+                msg!("Error updating price: {:?}", e);
+                e
+            })?;
+
+        let new_price = price_oracle.get_current_price(asset_type)
+            .map_err(|e| {
+                msg!("Error getting updated price: {:?}", e);
+                e
+            })?;
+
         msg!("Updated price for {:?}: {}", asset_type, new_price);
+        sol_log_compute_units();
         Ok(())
     }
 
     pub fn update_apy(ctx: Context<UpdateApy>, asset_type: AssetType) -> Result<()> {
-        let clock = Clock::get()?;
+        sol_log_compute_units();
+        msg!("Updating APY for {:?}", asset_type);
+
+        let clock = Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?;
         let mut price_oracle = PriceOracle {
             header: ctx.accounts.header.clone(),
             data: ctx.accounts.data.clone(),
         };
-        price_oracle.update_apy(&ctx.accounts.oracle_feed, asset_type, &clock)?;
 
-        let apy = price_oracle.get_current_apy(asset_type)?;
+        price_oracle.update_apy(&ctx.accounts.oracle_feed, asset_type, &clock)
+            .map_err(|e| {
+                msg!("Error updating APY: {:?}", e);
+                e
+            })?;
+
+        let apy = price_oracle.get_current_apy(asset_type)
+            .map_err(|e| {
+                msg!("Error getting updated APY: {:?}", e);
+                e
+            })?;
+
         msg!("Updated APY for {:?}: {}", asset_type, apy);
+        sol_log_compute_units();
         Ok(())
     }
 
