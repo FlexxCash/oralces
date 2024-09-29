@@ -70,7 +70,7 @@ describe("price_oracle", () => {
 
       const dataAccount = await (program.account as any)['priceOracleData'].fetch(priceOracleDataPda);
       const jupSolPrice = dataAccount.priceData.find((_, index: number) => 
-        'jupSol' in (dataAccount.assetTypes[index] as any)
+        dataAccount.assetTypes[index].jupSol !== undefined
       );
       assert.isNotNull(jupSolPrice, "JupSOL price should not be null");
       assert.isTrue(jupSolPrice.price > 0, "JupSOL price should be greater than 0");
@@ -92,7 +92,7 @@ describe("price_oracle", () => {
 
       const dataAccount = await (program.account as any)['priceOracleData'].fetch(priceOracleDataPda);
       const jupSolApy = dataAccount.priceData.find((_, index: number) => 
-        'jupSol' in (dataAccount.assetTypes[index] as any)
+        dataAccount.assetTypes[index].jupSol !== undefined
       );
       assert.isNotNull(jupSolApy, "JupSOL APY should not be null");
       assert.isTrue(jupSolApy.apy > 0, "JupSOL APY should be greater than 0");

@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-oracles = "fkuu5nF9RFtEuJGzVeqcbPf8x9C7gwJYkiaoWzkB7Tm"
+oracles = "HpbK3R8i9sv2LvVnKNTotDL42m6ygDe5h91KDPRKdgzi"
 
 [registry]
 url = "https://api.apr.dev"

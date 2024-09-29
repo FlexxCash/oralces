@@ -6,7 +6,7 @@ use switchboard_v2::AggregatorAccountData;
 pub mod price_oracle;
 use price_oracle::{AssetType, AssetTypeWrapper, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError};
 
-declare_id!("fkuu5nF9RFtEuJGzVeqcbPf8x9C7gwJYkiaoWzkB7Tm");
+declare_id!("HpbK3R8i9sv2LvVnKNTotDL42m6ygDe5h91KDPRKdgzi");
 
 #[program]
 pub mod oracles {

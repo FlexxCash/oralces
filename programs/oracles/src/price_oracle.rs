@@ -14,26 +14,42 @@ pub enum AssetType {
     SOL,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, PartialEq)]
-pub struct AssetTypeWrapper(u8);
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, PartialEq, Debug)]
+pub enum AssetTypeWrapper {
+    #[default]
+    JupSOL,
+    MSOL,
+    BSOL,
+    HSOL,
+    JitoSOL,
+    VSOL,
+    SOL,
+}
 
 impl From<AssetType> for AssetTypeWrapper {
     fn from(asset_type: AssetType) -> Self {
-        AssetTypeWrapper(asset_type as u8)
+        match asset_type {
+            AssetType::JupSOL => AssetTypeWrapper::JupSOL,
+            AssetType::MSOL => AssetTypeWrapper::MSOL,
+            AssetType::BSOL => AssetTypeWrapper::BSOL,
+            AssetType::HSOL => AssetTypeWrapper::HSOL,
+            AssetType::JitoSOL => AssetTypeWrapper::JitoSOL,
+            AssetType::VSOL => AssetTypeWrapper::VSOL,
+            AssetType::SOL => AssetTypeWrapper::SOL,
+        }
     }
 }
 
 impl From<AssetTypeWrapper> for AssetType {
     fn from(wrapper: AssetTypeWrapper) -> Self {
-        match wrapper.0 {
-            0 => AssetType::JupSOL,
-            1 => AssetType::MSOL,
-            2 => AssetType::BSOL,
-            3 => AssetType::HSOL,
-            4 => AssetType::JitoSOL,
-            5 => AssetType::VSOL,
-            6 => AssetType::SOL,
-            _ => panic!("Invalid AssetType"),
+        match wrapper {
+            AssetTypeWrapper::JupSOL => AssetType::JupSOL,
+            AssetTypeWrapper::MSOL => AssetType::MSOL,
+            AssetTypeWrapper::BSOL => AssetType::BSOL,
+            AssetTypeWrapper::HSOL => AssetType::HSOL,
+            AssetTypeWrapper::JitoSOL => AssetType::JitoSOL,
+            AssetTypeWrapper::VSOL => AssetType::VSOL,
+            AssetTypeWrapper::SOL => AssetType::SOL,
         }
     }
 }
