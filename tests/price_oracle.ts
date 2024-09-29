@@ -1,34 +1,43 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { Oracles } from "../target/types/oracles";
-import { PublicKey } from '@solana/web3.js';
+import { Program, AnchorProvider, Idl } from "@coral-xyz/anchor";
 import { assert } from "chai";
+
+// 定義自定義接口
+interface PriceOracleProgram extends Program<Idl> {
+  account: {
+    priceOracleHeader: any;
+    priceOracleData: any;
+  };
+}
 
 describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.Oracles as Program<Oracles>;
+  // 手動初始化程序
+  const programId = new anchor.web3.PublicKey("AtguUUsGDXry7onmb7QqDK4DLwquRkQPsXX1CJTjZsUy");
+  const idl = require("../target/idl/oracles.json") as Idl;
+  const program = new anchor.Program(idl, programId, provider) as PriceOracleProgram;
 
-  let priceOracleHeaderPda: PublicKey;
-  let priceOracleDataPda: PublicKey;
-  let oracleFeed: PublicKey;
+  let priceOracleHeaderPda: anchor.web3.PublicKey;
+  let priceOracleDataPda: anchor.web3.PublicKey;
+  let oracleFeed: anchor.web3.PublicKey;
 
   before(async () => {
-    const [headerPda] = await PublicKey.findProgramAddress(
+    const [headerPda] = await anchor.web3.PublicKey.findProgramAddress(
       [Buffer.from("price_oracle_header")],
       program.programId
     );
     priceOracleHeaderPda = headerPda;
 
-    const [dataPda] = await PublicKey.findProgramAddress(
+    const [dataPda] = await anchor.web3.PublicKey.findProgramAddress(
       [Buffer.from("price_oracle_data")],
       program.programId
     );
     priceOracleDataPda = dataPda;
 
     // 使用 JupSOL 的 feed address 作為示例
-    oracleFeed = new PublicKey("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA");
+    oracleFeed = new anchor.web3.PublicKey("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA");
   });
 
   it("Initializes the price oracle", async () => {
