@@ -29,7 +29,7 @@ describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const programId = new anchor.web3.PublicKey("4m55zdNRcXrFTRfJxwm6t3nMUNE9rFztu2RXUD61KLas");
+  const programId = new anchor.web3.PublicKey("9rK2cdpDThj5s3qa4W6FA7D4E3gnXjVxBTgen8FypMUj");
   const program = anchor.workspace.Oracles as Program<any>;
 
   let priceOracleHeaderPda: anchor.web3.PublicKey;

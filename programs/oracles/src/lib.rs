@@ -1,26 +1,20 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::solana_program::log::sol_log_compute_units;
-use switchboard_v2::AggregatorAccountData;
+use switchboard_v2::{AggregatorAccountData, SwitchboardDecimal};
 
 pub mod price_oracle;
 use price_oracle::{AssetType, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError};
 
-declare_id!("4m55zdNRcXrFTRfJxwm6t3nMUNE9rFztu2RXUD61KLas");
+declare_id!("9rK2cdpDThj5s3qa4W6FA7D4E3gnXjVxBTgen8FypMUj");
 
-// 定義價格變化閾值常量
+// Define price change threshold constant
 const PRICE_CHANGE_THRESHOLD: f64 = 0.20; // 20%
 
 #[program]
 pub mod oracles {
     use super::*;
 
-    /// 初始化價格預言機
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - 初始化上下文
-    /// * `switchboard_program_id` - Switchboard 程序 ID
     pub fn initialize(ctx: Context<Initialize>, switchboard_program_id: Pubkey) -> Result<()> {
         msg!("Initializing Price Oracle");
         PriceOracle::initialize(
@@ -35,20 +29,17 @@ pub mod oracles {
         Ok(())
     }
 
-    /// 更新資產的價格和 APY
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - 更新上下文
-    /// * `asset_type` - 要更新的資產類型
     pub fn update_price_and_apy(ctx: Context<UpdatePriceAndApy>, asset_type: AssetType) -> Result<()> {
         sol_log_compute_units();
         msg!("Updating price and APY for {:?}", asset_type);
 
         let clock = Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?;
 
-        // 驗證 Switchboard 程式 ID
+        // Validate Switchboard program ID
         if ctx.accounts.oracle_feed.to_account_info().owner != &ctx.accounts.header.switchboard_program_id {
+            msg!("Invalid Switchboard account owner: expected {}, found {}", 
+                ctx.accounts.header.switchboard_program_id, 
+                ctx.accounts.oracle_feed.to_account_info().owner);
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
@@ -71,7 +62,7 @@ pub mod oracles {
         msg!("Updated price for {:?}: {} -> {}", asset_type, old_price, new_price);
         msg!("Updated APY for {:?}: {} -> {}", asset_type, old_apy, new_apy);
         
-        let price_change = (new_price - old_price).abs() / old_price;
+        let price_change = if old_price != 0.0 { (new_price - old_price).abs() / old_price } else { 1.0 };
         if price_change > PRICE_CHANGE_THRESHOLD {
             msg!("Warning: Price change exceeds {}%", PRICE_CHANGE_THRESHOLD * 100.0);
         }
@@ -80,19 +71,17 @@ pub mod oracles {
         Ok(())
     }
 
-    /// 更新 SOL 價格
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - 更新上下文
     pub fn update_sol_price(ctx: Context<UpdateSolPrice>) -> Result<()> {
         sol_log_compute_units();
         msg!("Updating SOL price");
 
         let clock = Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?;
 
-        // 驗證 Switchboard 程式 ID
+        // Validate Switchboard program ID
         if ctx.accounts.oracle_feed.to_account_info().owner != &ctx.accounts.header.switchboard_program_id {
+            msg!("Invalid Switchboard account owner: expected {}, found {}", 
+                ctx.accounts.header.switchboard_program_id, 
+                ctx.accounts.oracle_feed.to_account_info().owner);
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
@@ -109,7 +98,7 @@ pub mod oracles {
         let new_price = PriceOracle::get_current_price(&ctx.accounts.data, AssetType::SOL)?;
         msg!("Updated SOL price: {} -> {}", old_price, new_price);
 
-        let price_change = (new_price - old_price).abs() / old_price;
+        let price_change = if old_price != 0.0 { (new_price - old_price).abs() / old_price } else { 1.0 };
         if price_change > PRICE_CHANGE_THRESHOLD {
             msg!("Warning: SOL price change exceeds {}%", PRICE_CHANGE_THRESHOLD * 100.0);
         }
@@ -118,48 +107,25 @@ pub mod oracles {
         Ok(())
     }
 
-    /// 更新 Switchboard 程序 ID
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - 更新上下文
-    /// * `new_program_id` - 新的 Switchboard 程序 ID
     pub fn update_switchboard_program_id(ctx: Context<UpdateSwitchboardProgramId>, new_program_id: Pubkey) -> Result<()> {
+        msg!("Updating Switchboard program ID from {} to {}", ctx.accounts.header.switchboard_program_id, new_program_id);
         ctx.accounts.header.switchboard_program_id = new_program_id;
         msg!("Updated Switchboard program ID to: {}", new_program_id);
         Ok(())
     }
 
-    /// 獲取當前價格
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - 上下文
-    /// * `asset_type` - 資產類型
     pub fn get_current_price(ctx: Context<GetPrice>, asset_type: AssetType) -> Result<()> {
         let price = PriceOracle::get_current_price(&ctx.accounts.data, asset_type)?;
         msg!("Current price for {:?}: {}", asset_type, price);
         Ok(())
     }
 
-    /// 獲取當前 APY
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - 上下文
-    /// * `asset_type` - 資產類型
     pub fn get_current_apy(ctx: Context<GetApy>, asset_type: AssetType) -> Result<()> {
         let apy = PriceOracle::get_current_apy(&ctx.accounts.data, asset_type)?;
         msg!("Current APY for {:?}: {}", asset_type, apy);
         Ok(())
     }
 
-    /// 設置緊急停止
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - 上下文
-    /// * `stop` - 是否停止
     pub fn set_emergency_stop(ctx: Context<SetEmergencyStop>, stop: bool) -> Result<()> {
         PriceOracle::set_emergency_stop(&mut ctx.accounts.header, stop);
         msg!("Emergency stop set to: {}", stop);
