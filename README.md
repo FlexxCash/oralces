@@ -15,12 +15,11 @@ flexxcash_bnpl/
 │           └── price_oracle.rs
 │
 ├── tests/
-│   ├── flexxcash_oracle.ts
 │   └── price_oracle.ts
 │
 ├── Anchor.toml
 ├── README.md
-└── rebuild.sh
+└── Cargo.toml
 ```
 
 ## Dependencies
@@ -175,19 +174,23 @@ This file implements the core logic of the price oracle.
      - `last_price: f64` - Previous price.
      - `last_update_time: i64` - Timestamp of the last update.
 
-2. `ApyData`
-   - Purpose: Stores APY-related data.
-   - Fields:
      - `apy: f64` - Current APY.
-     - `last_update_time: i64` - Timestamp of the last update.
 
-3. `PriceOracle`
-   - Purpose: Main struct for the price oracle.
+2. `PriceOracleHeader`
+   - Purpose: Stores global oracle data.
    - Fields:
-     - `prices: Vec<(AssetType, PriceData)>` - Vector of asset types and their price data.
-     - `apys: Vec<(AssetType, ApyData)>` - Vector of asset types and their APY data.
+     - `asset_count: u8` - Number of assets tracked.
      - `last_global_update: i64` - Timestamp of the last global update.
      - `emergency_stop: bool` - Emergency stop flag.
+     - `authority: Pubkey` - Authority public key.
+     - `bump: u8` - PDA bump.
+
+3. `PriceOracleData`
+   - Purpose: Stores price data for all assets.
+   - Fields:
+     - `price_data: Vec<PriceData>` - Vector of price data for each asset.
+     - `asset_types: Vec<AssetTypeWrapper>` - Vector of asset types.
+     - `bump: u8` - PDA bump.
 
 #### Functions
 
@@ -258,11 +261,10 @@ This file implements the core logic of the price oracle.
       - `self` - Mutable reference to the PriceOracle instance.
       - `stop` - Boolean value to set the emergency stop status.
 
-11. `PriceOracle::get_price_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64>`
-    - Purpose: Gets the price from a Switchboard feed.
-    - Parameters: `feed` - Reference to the Switchboard feed account.
-    - Returns: `Result<f64>` - The price from the feed or an error.
-
+11. `convert_switchboard_decimal(decimal: SwitchboardDecimal) -> Result<f64>`
+    - Purpose: Converts a SwitchboardDecimal to an f64.
+    - Parameters: `decimal` - The SwitchboardDecimal to convert.
+    - Returns: `Result<f64>` - The converted f64 value or an error.
 12. `PriceOracle::get_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64>`
     - Purpose: Gets the APY from a Switchboard feed.
     - Parameters: `feed` - Reference to the Switchboard feed account.
@@ -287,7 +289,6 @@ This file implements the core logic of the price oracle.
 - `StaleData` - Data is stale.
 - `ExceedsConfidenceInterval` - Data exceeds the confidence interval.
 
-
 ## Usage
 
 1. Ensure Rust and Solana CLI are installed.
@@ -298,24 +299,7 @@ This file implements the core logic of the price oracle.
 
 ## Troubleshooting
 
-If you encounter errors related to missing Anchor macros or unable to find program files, you can use the provided `rebuild.sh` script to update Anchor, clean the project, and rebuild:
-
-1. Make the script executable:
-   ```
-   chmod +x rebuild.sh
-   ```
-
-2. Run the script:
-   ```
-   ./rebuild.sh
-   ```
-
-This script will perform the following actions:
-- Update Anchor to the latest version
-- Clean the project
-- Rebuild the project
-
-If you still encounter issues after running the script, please refer to the following additional troubleshooting steps:
+If you encounter errors related to missing Anchor macros or unable to find program files, try the following steps:
 
 1. Ensure your Solana CLI is on the correct network (localnet for testing):
    ```
@@ -342,7 +326,7 @@ If you still encounter issues after running the script, please refer to the foll
 - USDC price is fixed at $1.00.
 - There's an emergency stop mechanism to prevent updates in case of abnormal conditions.
 - Price changes exceeding 20% will trigger an error to prevent abnormal fluctuations.
-
+- The `convert_switchboard_decimal` function is used to safely convert Switchboard's decimal representation to a standard f64 value.
 
 ## Running Tests
 
@@ -370,8 +354,6 @@ To run the tests for this project, follow these steps:
 This will execute all the tests defined in the `tests/price_oracle.ts` file.
 
 Note: Make sure you have a local Solana test validator running before executing the tests. If you encounter any issues, refer to the Troubleshooting section in this README.
-
-[... 保留原有內容 ...]
 
 ## Contributing
 

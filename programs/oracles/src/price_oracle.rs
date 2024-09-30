@@ -3,6 +3,10 @@ use anchor_lang::solana_program::clock;
 use std::convert::TryInto;
 use switchboard_v2::{AggregatorAccountData, SwitchboardDecimal, SWITCHBOARD_PROGRAM_ID};
 
+// Define constants
+const MAX_SWITCHBOARD_DATA_AGE: i64 = 300; // 5 minutes
+const SWITCHBOARD_CONFIDENCE_INTERVAL: f64 = 0.80;
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum AssetType {
     JupSOL,
@@ -115,6 +119,7 @@ impl PriceOracle {
         clock: &Clock
     ) -> Result<()> {
         if header.emergency_stop {
+            msg!("Emergency stop is activated. Price update aborted.");
             return Err(error!(OracleError::EmergencyStop));
         }
 
@@ -125,6 +130,7 @@ impl PriceOracle {
         if let Some(price_data) = data.price_data.get_mut(index) {
             let price_change = (new_price - price_data.price).abs() / price_data.price;
             if price_change > 0.2 {
+                msg!("Price change exceeds 20% limit. Old price: {}, New price: {}", price_data.price, new_price);
                 header.emergency_stop = true;
                 return Err(error!(OracleError::PriceChangeExceedsLimit));
             }
@@ -132,7 +138,9 @@ impl PriceOracle {
             price_data.last_price = price_data.price;
             price_data.price = new_price;
             price_data.last_update_time = current_time;
+            msg!("Price updated for {:?}. New price: {}", asset_type, new_price);
         } else {
+            msg!("Invalid index for asset type {:?}", asset_type);
             return Err(error!(OracleError::InvalidIndex));
         }
 
@@ -210,31 +218,47 @@ impl PriceOracle {
     }
 
     fn get_price_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64> {
-        let feed_data = feed.load()?;
+        let feed_data = feed.load().map_err(|_| error!(OracleError::InvalidSwitchboardAccount))?;
 
         if feed.to_account_info().owner != &SWITCHBOARD_PROGRAM_ID {
+            msg!("Invalid Switchboard account owner");
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        let decimal: f64 = feed_data.get_result()?.try_into()?;
+        let switchboard_decimal = feed_data.get_result()?;
+        let decimal = convert_switchboard_decimal(switchboard_decimal)?;
 
-        feed_data.check_staleness(clock::Clock::get().unwrap().unix_timestamp, 300)?;
-        feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(0.80))?;
+        let current_timestamp = clock::Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?.unix_timestamp;
+        feed_data.check_staleness(current_timestamp, MAX_SWITCHBOARD_DATA_AGE)
+            .map_err(|_| {
+                msg!("Switchboard data is stale");
+                error!(OracleError::StaleData)
+            })?;
+
+        feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(SWITCHBOARD_CONFIDENCE_INTERVAL))
+            .map_err(|_| {
+                msg!("Switchboard data exceeds confidence interval");
+                error!(OracleError::ExceedsConfidenceInterval)
+            })?;
 
         Ok(decimal)
     }
 
     fn get_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64> {
-        let feed_data = feed.load()?;
+        let feed_data = feed.load().map_err(|_| error!(OracleError::InvalidSwitchboardAccount))?;
 
         if feed.to_account_info().owner != &SWITCHBOARD_PROGRAM_ID {
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        let decimal: f64 = feed_data.get_result()?.try_into()?;
+        let switchboard_decimal = feed_data.get_result()?;
+        let decimal = convert_switchboard_decimal(switchboard_decimal)?;
 
-        feed_data.check_staleness(clock::Clock::get().unwrap().unix_timestamp, 300)?;
-        feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(0.001))?;
+        let current_timestamp = clock::Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?.unix_timestamp;
+        feed_data.check_staleness(current_timestamp, MAX_SWITCHBOARD_DATA_AGE)
+            .map_err(|_| error!(OracleError::StaleData))?;
+        feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(SWITCHBOARD_CONFIDENCE_INTERVAL))
+            .map_err(|_| error!(OracleError::ExceedsConfidenceInterval))?;
 
         Ok(decimal)
     }
@@ -246,6 +270,31 @@ impl PriceOracle {
     pub fn get_price_oracle_data_pda(program_id: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[Self::DATA_SEED], program_id)
     }
+}
+
+/// Converts a SwitchboardDecimal to an f64.
+///
+/// This function is a public wrapper around the private switchboard_decimal_to_f64 function.
+/// It's used to convert Switchboard's decimal representation to a standard f64 value.
+///
+/// # Arguments
+///
+/// * `decimal` - A SwitchboardDecimal to be converted.
+///
+/// # Returns
+///
+/// * `Result<f64>` - The converted f64 value if successful, or an error if the conversion fails.
+pub fn convert_switchboard_decimal(decimal: SwitchboardDecimal) -> Result<f64> {
+    switchboard_decimal_to_f64(decimal)
+}
+
+// Helper function to convert SwitchboardDecimal to f64
+fn switchboard_decimal_to_f64(decimal: SwitchboardDecimal) -> Result<f64> {
+    let value = (decimal.mantissa as f64) * 10f64.powi(decimal.scale.try_into().unwrap());
+    if value.is_infinite() || value.is_nan() {
+        return Err(error!(OracleError::SwitchboardConversionError));
+    }
+    Ok(value)
 }
 
 #[error_code]
@@ -286,4 +335,51 @@ pub enum OracleError {
     InvalidIndex,
     #[msg("Clock unavailable")]
     ClockUnavailable,
+    #[msg("Invalid Switchboard program")]
+    InvalidSwitchboardProgram,
+    #[msg("Error converting Switchboard decimal")]
+    SwitchboardConversionError,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_switchboard_decimal() {
+        // Test normal case
+        let normal_decimal = SwitchboardDecimal {
+            mantissa: 12345,
+            scale: 2,
+        };
+        assert_eq!(convert_switchboard_decimal(normal_decimal).unwrap(), 123.45);
+
+        // Test very small number
+        let small_decimal = SwitchboardDecimal {
+            mantissa: 1,
+            scale: 10,
+        };
+        assert_eq!(convert_switchboard_decimal(small_decimal).unwrap(), 1e-10);
+
+        // Test very large number
+        let large_decimal = SwitchboardDecimal {
+            mantissa: 1234567890123456,
+            scale: -5,
+        };
+        assert_eq!(convert_switchboard_decimal(large_decimal).unwrap(), 1.234567890123456e20);
+
+        // Test zero
+        let zero_decimal = SwitchboardDecimal {
+            mantissa: 0,
+            scale: 0,
+        };
+        assert_eq!(convert_switchboard_decimal(zero_decimal).unwrap(), 0.0);
+
+        // Test error case (infinity)
+        let infinity_decimal = SwitchboardDecimal {
+            mantissa: 1,
+            scale: 1000,
+        };
+        assert!(convert_switchboard_decimal(infinity_decimal).is_err());
+    }
 }

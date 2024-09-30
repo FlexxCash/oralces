@@ -1,18 +1,19 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::solana_program::log::sol_log_compute_units;
-use switchboard_v2::AggregatorAccountData;
+use switchboard_v2::{AggregatorAccountData, SWITCHBOARD_PROGRAM_ID};
 
 pub mod price_oracle;
-use price_oracle::{AssetType, AssetTypeWrapper, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError};
+use price_oracle::{AssetType, AssetTypeWrapper, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError, convert_switchboard_decimal};
 
-declare_id!("GjYKX1fu1JuWHiczYM6CPUwkyp3ECP3UUS3nouzZMsRX");
+declare_id!("GxkpGSztczkz7hNPUcN8XbZjnyMYqW8YMmTqtKVA579e");
 
 #[program]
 pub mod oracles {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+        msg!("Initializing Price Oracle");
         PriceOracle::initialize(
             &mut ctx.accounts.header,
             &mut ctx.accounts.data,
@@ -20,7 +21,7 @@ pub mod oracles {
             *ctx.bumps.get("header").unwrap(),
             *ctx.bumps.get("data").unwrap(),
         )?;
-        msg!("Price oracle initialized");
+        msg!("Price oracle initialized successfully");
         Ok(())
     }
 
@@ -29,6 +30,12 @@ pub mod oracles {
         msg!("Updating price for {:?}", asset_type);
 
         let clock = Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?;
+
+        // 從 Switchboard 聚合器獲取最新價格
+        let aggregator = &ctx.accounts.oracle_feed.load()?;
+        let switchboard_decimal = aggregator.get_result()?;
+        let latest_price = convert_switchboard_decimal(switchboard_decimal)
+            .map_err(|_| error!(OracleError::SwitchboardConversionError))?;
 
         PriceOracle::update_price(
             &mut ctx.accounts.header,
@@ -137,6 +144,9 @@ pub struct UpdatePrice<'info> {
         bump = data.bump,
     )]
     pub data: Account<'info, PriceOracleData>,
+    #[account(
+        constraint = oracle_feed.to_account_info().owner == &SWITCHBOARD_PROGRAM_ID @ OracleError::InvalidSwitchboardAccount
+    )]
     pub oracle_feed: AccountLoader<'info, AggregatorAccountData>,
     #[account(constraint = authority.key() == header.authority @ OracleError::UnauthorizedAccess)]
     pub authority: Signer<'info>,
@@ -156,7 +166,13 @@ pub struct UpdateApy<'info> {
         bump = data.bump,
     )]
     pub data: Account<'info, PriceOracleData>,
+    #[account(
+        constraint = oracle_feed.to_account_info().owner == &SWITCHBOARD_PROGRAM_ID @ OracleError::InvalidSwitchboardAccount
+    )]
     pub oracle_feed: AccountLoader<'info, AggregatorAccountData>,
+    /// CHECK: This is the Switchboard program ID
+    #[account(address = SWITCHBOARD_PROGRAM_ID @ OracleError::InvalidSwitchboardProgram)]
+    pub switchboard_program: AccountInfo<'info>,
     #[account(constraint = authority.key() == header.authority @ OracleError::UnauthorizedAccess)]
     pub authority: Signer<'info>,
 }

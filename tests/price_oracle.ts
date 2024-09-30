@@ -6,13 +6,14 @@ describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  // 使用 Anchor.toml 中定義的程序 ID
-  const programId = new anchor.web3.PublicKey("4WxVP1ZviLWiuUW9E4s91w9mzCJdH4L7J2UEiUGHwQdG");
+  // 更新為 lib.rs 中聲明的程序 ID
+  const programId = new anchor.web3.PublicKey("GxkpGSztczkz7hNPUcN8XbZjnyMYqW8YMmTqtKVA579e");
   const program = anchor.workspace.Oracles as Program<any>;
 
   let priceOracleHeaderPda: anchor.web3.PublicKey;
   let priceOracleDataPda: anchor.web3.PublicKey;
   let oracleFeed: anchor.web3.PublicKey;
+  let switchboardProgram: anchor.web3.PublicKey;
 
   before(async () => {
     try {
@@ -29,6 +30,7 @@ describe("price_oracle", () => {
       priceOracleDataPda = dataPda;
 
       oracleFeed = new anchor.web3.PublicKey("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA");
+      switchboardProgram = new anchor.web3.PublicKey("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");
     } catch (error) {
       console.error("Error in before hook:", error);
       throw error;
@@ -88,6 +90,7 @@ describe("price_oracle", () => {
           header: priceOracleHeaderPda,
           data: priceOracleDataPda,
           oracleFeed: oracleFeed,
+          switchboardProgram: switchboardProgram,
           authority: provider.wallet.publicKey,
         })
         .rpc();
@@ -191,5 +194,67 @@ describe("price_oracle", () => {
       console.error("Error setting or checking emergency stop:", error);
       throw error;
     }
+  });
+
+  it("Fails to update price when emergency stop is active", async () => {
+    try {
+      await program.methods.updatePrice({ jupSol: {} })
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+          oracleFeed: oracleFeed,
+          authority: provider.wallet.publicKey,
+        })
+        .rpc();
+
+      assert.fail("Should have thrown an error");
+    } catch (error) {
+      assert.include(error.toString(), "Emergency stop activated");
+    }
+  });
+
+  it("Fails to update price with unauthorized user", async () => {
+    const unauthorizedUser = anchor.web3.Keypair.generate();
+    try {
+      await program.methods.updatePrice({ jupSol: {} })
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+          oracleFeed: oracleFeed,
+          authority: unauthorizedUser.publicKey,
+        })
+        .signers([unauthorizedUser])
+        .rpc();
+
+      assert.fail("Should have thrown an error");
+    } catch (error) {
+      assert.include(error.toString(), "Unauthorized access");
+    }
+  });
+
+  it("Updates price for multiple assets", async () => {
+    // 首先關閉緊急停止
+    await program.methods.setEmergencyStop(false)
+      .accounts({
+        header: priceOracleHeaderPda,
+        data: priceOracleDataPda,
+        authority: provider.wallet.publicKey,
+      })
+      .rpc();
+
+    const assets = [{ mSol: {} }, { bSol: {} }, { hSol: {} }];
+    for (const asset of assets) {
+      await program.methods.updatePrice(asset)
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+          oracleFeed: oracleFeed,
+          authority: provider.wallet.publicKey,
+        })
+        .rpc();
+    }
+
+    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
+    assert.isAtLeast((dataAccount as any).assetTypes.length, assets.length, "Should have updated all new assets");
   });
 });
