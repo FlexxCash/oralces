@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock;
 use std::convert::TryInto;
-use switchboard_v2::{AggregatorAccountData, SwitchboardDecimal, SWITCHBOARD_PROGRAM_ID};
+use switchboard_v2::{AggregatorAccountData, SwitchboardDecimal};
 
 // Define constants
 const MAX_SWITCHBOARD_DATA_AGE: i64 = 300; // 5 minutes
@@ -73,6 +73,7 @@ pub struct PriceOracleHeader {
     pub last_global_update: i64,
     pub emergency_stop: bool,
     pub authority: Pubkey,
+    pub switchboard_program_id: Pubkey,
     pub bump: u8,
 }
 
@@ -95,6 +96,7 @@ impl PriceOracle {
         header: &mut Account<PriceOracleHeader>,
         data: &mut Account<PriceOracleData>,
         authority: &Signer,
+        switchboard_program_id: Pubkey,
         header_bump: u8,
         data_bump: u8,
     ) -> Result<()> {
@@ -102,6 +104,7 @@ impl PriceOracle {
         header.last_global_update = 0;
         header.emergency_stop = false;
         header.authority = authority.key();
+        header.switchboard_program_id = switchboard_program_id;
         header.bump = header_bump;
 
         data.price_data = Vec::new();
@@ -123,7 +126,7 @@ impl PriceOracle {
             return Err(error!(OracleError::EmergencyStop));
         }
 
-        let new_price = Self::get_price_from_feed(feed)?;
+        let new_price = Self::get_price_from_feed(feed, &header.switchboard_program_id)?;
         let current_time = clock.unix_timestamp;
 
         let index = Self::find_or_add_asset(header, data, asset_type)?;
@@ -159,7 +162,7 @@ impl PriceOracle {
             return Err(error!(OracleError::EmergencyStop));
         }
 
-        let apy = Self::get_apy_from_feed(feed)?;
+        let apy = Self::get_apy_from_feed(feed, &header.switchboard_program_id)?;
         let current_time = clock.unix_timestamp;
 
         let index = Self::find_or_add_asset(header, data, asset_type)?;
@@ -217,10 +220,10 @@ impl PriceOracle {
         }
     }
 
-    fn get_price_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64> {
+    fn get_price_from_feed(feed: &AccountLoader<AggregatorAccountData>, switchboard_program_id: &Pubkey) -> Result<f64> {
         let feed_data = feed.load().map_err(|_| error!(OracleError::InvalidSwitchboardAccount))?;
 
-        if feed.to_account_info().owner != &SWITCHBOARD_PROGRAM_ID {
+        if feed.to_account_info().owner != switchboard_program_id {
             msg!("Invalid Switchboard account owner");
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
@@ -244,10 +247,10 @@ impl PriceOracle {
         Ok(decimal)
     }
 
-    fn get_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64> {
+    fn get_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>, switchboard_program_id: &Pubkey) -> Result<f64> {
         let feed_data = feed.load().map_err(|_| error!(OracleError::InvalidSwitchboardAccount))?;
 
-        if feed.to_account_info().owner != &SWITCHBOARD_PROGRAM_ID {
+        if feed.to_account_info().owner != switchboard_program_id {
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 

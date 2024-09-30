@@ -2,6 +2,27 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { assert } from "chai";
 
+// 添加 PriceOracleHeader 和 PriceOracleData 的類型定義
+interface PriceOracleHeader {
+  assetCount: number;
+  lastGlobalUpdate: anchor.BN;
+  emergencyStop: boolean;
+  authority: anchor.web3.PublicKey;
+  switchboardProgramId: anchor.web3.PublicKey;
+  bump: number;
+}
+
+interface PriceOracleData {
+  priceData: Array<{
+    price: number;
+    lastPrice: number;
+    lastUpdateTime: anchor.BN;
+    apy: number;
+  }>;
+  assetTypes: Array<any>; // 這裡可以根據實際的資產類型定義更具體的類型
+  bump: number;
+}
+
 describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
@@ -29,7 +50,7 @@ describe("price_oracle", () => {
       );
       priceOracleDataPda = dataPda;
 
-      oracleFeed = new anchor.web3.PublicKey("3zkXukqF4CBSUAq55uAx1CnGrzDKk3cVAesJ4WLpSzgA");
+      oracleFeed = new anchor.web3.PublicKey("BPmubr9zibqNErffzaxBchZcrMUwhXaNw8VBpKKCkoob");
       switchboardProgram = new anchor.web3.PublicKey("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");
     } catch (error) {
       console.error("Error in before hook:", error);
@@ -39,7 +60,7 @@ describe("price_oracle", () => {
 
   it("Initializes the price oracle", async () => {
     try {
-      await program.methods.initialize()
+      await program.methods.initialize(switchboardProgram)
         .accounts({
           header: priceOracleHeaderPda,
           data: priceOracleDataPda,
@@ -48,12 +69,13 @@ describe("price_oracle", () => {
         })
         .rpc();
 
-      const headerAccount = await program.account.priceOracleHeader.fetch(priceOracleHeaderPda);
-      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
+      const headerAccount = await program.account.priceOracleHeader.fetch(priceOracleHeaderPda) as PriceOracleHeader;
+      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
       assert.isNotNull(headerAccount, "Header account should not be null");
       assert.isNotNull(dataAccount, "Data account should not be null");
-      assert.isEmpty((dataAccount as any).priceData, "Price data should be empty");
-      assert.isEmpty((dataAccount as any).assetTypes, "Asset types should be empty");
+      assert.isEmpty(dataAccount.priceData, "Price data should be empty");
+      assert.isEmpty(dataAccount.assetTypes, "Asset types should be empty");
+      assert.equal(headerAccount.switchboardProgramId.toBase58(), switchboardProgram.toBase58(), "Switchboard program ID should match");
     } catch (error) {
       console.error("Error initializing price oracle:", error);
       throw error;
@@ -71,9 +93,9 @@ describe("price_oracle", () => {
         })
         .rpc();
 
-      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
-      const jupSolPrice = (dataAccount as any).priceData.find((_, index: number) => 
-        (dataAccount as any).assetTypes[index].jupSol !== undefined
+      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
+      const jupSolPrice = dataAccount.priceData.find((_, index) => 
+        dataAccount.assetTypes[index].jupSol !== undefined
       );
       assert.isNotNull(jupSolPrice, "JupSOL price should not be null");
       assert.isTrue(jupSolPrice.price > 0, "JupSOL price should be greater than 0");
@@ -90,14 +112,13 @@ describe("price_oracle", () => {
           header: priceOracleHeaderPda,
           data: priceOracleDataPda,
           oracleFeed: oracleFeed,
-          switchboardProgram: switchboardProgram,
           authority: provider.wallet.publicKey,
         })
         .rpc();
 
-      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
-      const jupSolApy = (dataAccount as any).priceData.find((_, index: number) => 
-        (dataAccount as any).assetTypes[index].jupSol !== undefined
+      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
+      const jupSolApy = dataAccount.priceData.find((_, index) => 
+        dataAccount.assetTypes[index].jupSol !== undefined
       );
       assert.isNotNull(jupSolApy, "JupSOL APY should not be null");
       assert.isTrue(jupSolApy.apy > 0, "JupSOL APY should be greater than 0");
@@ -254,7 +275,25 @@ describe("price_oracle", () => {
         .rpc();
     }
 
-    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda);
-    assert.isAtLeast((dataAccount as any).assetTypes.length, assets.length, "Should have updated all new assets");
+    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
+    assert.isAtLeast(dataAccount.assetTypes.length, assets.length, "Should have updated all new assets");
+  });
+
+  it("Updates Switchboard program ID", async () => {
+    const newSwitchboardProgramId = anchor.web3.Keypair.generate().publicKey;
+    try {
+      await program.methods.updateSwitchboardProgramId(newSwitchboardProgramId)
+        .accounts({
+          header: priceOracleHeaderPda,
+          authority: provider.wallet.publicKey,
+        })
+        .rpc();
+
+      const headerAccount = await program.account.priceOracleHeader.fetch(priceOracleHeaderPda) as PriceOracleHeader;
+      assert.equal(headerAccount.switchboardProgramId.toBase58(), newSwitchboardProgramId.toBase58(), "Switchboard program ID should be updated");
+    } catch (error) {
+      console.error("Error updating Switchboard program ID:", error);
+      throw error;
+    }
   });
 });
