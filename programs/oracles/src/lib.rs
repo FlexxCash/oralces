@@ -4,14 +4,23 @@ use anchor_lang::solana_program::log::sol_log_compute_units;
 use switchboard_v2::AggregatorAccountData;
 
 pub mod price_oracle;
-use price_oracle::{AssetType, AssetTypeWrapper, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError, convert_switchboard_decimal};
+use price_oracle::{AssetType, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError};
 
-declare_id!("BPmubr9zibqNErffzaxBchZcrMUwhXaNw8VBpKKCkoob");
+declare_id!("4m55zdNRcXrFTRfJxwm6t3nMUNE9rFztu2RXUD61KLas");
+
+// 定義價格變化閾值常量
+const PRICE_CHANGE_THRESHOLD: f64 = 0.20; // 20%
 
 #[program]
 pub mod oracles {
     use super::*;
 
+    /// 初始化價格預言機
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - 初始化上下文
+    /// * `switchboard_program_id` - Switchboard 程序 ID
     pub fn initialize(ctx: Context<Initialize>, switchboard_program_id: Pubkey) -> Result<()> {
         msg!("Initializing Price Oracle");
         PriceOracle::initialize(
@@ -26,9 +35,15 @@ pub mod oracles {
         Ok(())
     }
 
-    pub fn update_price(ctx: Context<UpdatePrice>, asset_type: AssetType) -> Result<()> {
+    /// 更新資產的價格和 APY
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - 更新上下文
+    /// * `asset_type` - 要更新的資產類型
+    pub fn update_price_and_apy(ctx: Context<UpdatePriceAndApy>, asset_type: AssetType) -> Result<()> {
         sol_log_compute_units();
-        msg!("Updating price for {:?}", asset_type);
+        msg!("Updating price and APY for {:?}", asset_type);
 
         let clock = Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?;
 
@@ -37,13 +52,12 @@ pub mod oracles {
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        // 從 Switchboard 聚合器獲取最新價格
-        let aggregator = &ctx.accounts.oracle_feed.load()?;
-        let switchboard_decimal = aggregator.get_result()?;
-        let latest_price = convert_switchboard_decimal(switchboard_decimal)
-            .map_err(|_| error!(OracleError::SwitchboardConversionError))?;
+        let old_price = PriceOracle::get_current_price(&ctx.accounts.data, asset_type)
+            .unwrap_or_else(|_| 0.0);
+        let old_apy = PriceOracle::get_current_apy(&ctx.accounts.data, asset_type)
+            .unwrap_or_else(|_| 0.0);
 
-        PriceOracle::update_price(
+        PriceOracle::update_price_and_apy(
             &mut ctx.accounts.header,
             &mut ctx.accounts.data,
             &ctx.accounts.oracle_feed,
@@ -52,14 +66,28 @@ pub mod oracles {
         )?;
 
         let new_price = PriceOracle::get_current_price(&ctx.accounts.data, asset_type)?;
-        msg!("Updated price for {:?}: {}", asset_type, new_price);
+        let new_apy = PriceOracle::get_current_apy(&ctx.accounts.data, asset_type)?;
+        
+        msg!("Updated price for {:?}: {} -> {}", asset_type, old_price, new_price);
+        msg!("Updated APY for {:?}: {} -> {}", asset_type, old_apy, new_apy);
+        
+        let price_change = (new_price - old_price).abs() / old_price;
+        if price_change > PRICE_CHANGE_THRESHOLD {
+            msg!("Warning: Price change exceeds {}%", PRICE_CHANGE_THRESHOLD * 100.0);
+        }
+
         sol_log_compute_units();
         Ok(())
     }
 
-    pub fn update_apy(ctx: Context<UpdateApy>, asset_type: AssetType) -> Result<()> {
+    /// 更新 SOL 價格
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - 更新上下文
+    pub fn update_sol_price(ctx: Context<UpdateSolPrice>) -> Result<()> {
         sol_log_compute_units();
-        msg!("Updating APY for {:?}", asset_type);
+        msg!("Updating SOL price");
 
         let clock = Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?;
 
@@ -68,25 +96,73 @@ pub mod oracles {
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        PriceOracle::update_apy(
+        let old_price = PriceOracle::get_current_price(&ctx.accounts.data, AssetType::SOL)
+            .unwrap_or_else(|_| 0.0);
+
+        PriceOracle::update_sol_price(
             &mut ctx.accounts.header,
             &mut ctx.accounts.data,
             &ctx.accounts.oracle_feed,
-            asset_type,
             &clock,
         )?;
 
-        let apy = PriceOracle::get_current_apy(&ctx.accounts.data, asset_type)?;
-        msg!("Updated APY for {:?}: {}", asset_type, apy);
+        let new_price = PriceOracle::get_current_price(&ctx.accounts.data, AssetType::SOL)?;
+        msg!("Updated SOL price: {} -> {}", old_price, new_price);
+
+        let price_change = (new_price - old_price).abs() / old_price;
+        if price_change > PRICE_CHANGE_THRESHOLD {
+            msg!("Warning: SOL price change exceeds {}%", PRICE_CHANGE_THRESHOLD * 100.0);
+        }
+
         sol_log_compute_units();
         Ok(())
     }
 
-    // ... 其他函數保持不變 ...
-
+    /// 更新 Switchboard 程序 ID
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - 更新上下文
+    /// * `new_program_id` - 新的 Switchboard 程序 ID
     pub fn update_switchboard_program_id(ctx: Context<UpdateSwitchboardProgramId>, new_program_id: Pubkey) -> Result<()> {
         ctx.accounts.header.switchboard_program_id = new_program_id;
         msg!("Updated Switchboard program ID to: {}", new_program_id);
+        Ok(())
+    }
+
+    /// 獲取當前價格
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - 上下文
+    /// * `asset_type` - 資產類型
+    pub fn get_current_price(ctx: Context<GetPrice>, asset_type: AssetType) -> Result<()> {
+        let price = PriceOracle::get_current_price(&ctx.accounts.data, asset_type)?;
+        msg!("Current price for {:?}: {}", asset_type, price);
+        Ok(())
+    }
+
+    /// 獲取當前 APY
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - 上下文
+    /// * `asset_type` - 資產類型
+    pub fn get_current_apy(ctx: Context<GetApy>, asset_type: AssetType) -> Result<()> {
+        let apy = PriceOracle::get_current_apy(&ctx.accounts.data, asset_type)?;
+        msg!("Current APY for {:?}: {}", asset_type, apy);
+        Ok(())
+    }
+
+    /// 設置緊急停止
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - 上下文
+    /// * `stop` - 是否停止
+    pub fn set_emergency_stop(ctx: Context<SetEmergencyStop>, stop: bool) -> Result<()> {
+        PriceOracle::set_emergency_stop(&mut ctx.accounts.header, stop);
+        msg!("Emergency stop set to: {}", stop);
         Ok(())
     }
 }
@@ -115,7 +191,7 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
-pub struct UpdatePrice<'info> {
+pub struct UpdatePriceAndApy<'info> {
     #[account(
         mut,
         seeds = [PriceOracle::HEADER_SEED],
@@ -135,7 +211,7 @@ pub struct UpdatePrice<'info> {
 }
 
 #[derive(Accounts)]
-pub struct UpdateApy<'info> {
+pub struct UpdateSolPrice<'info> {
     #[account(
         mut,
         seeds = [PriceOracle::HEADER_SEED],
@@ -166,4 +242,32 @@ pub struct UpdateSwitchboardProgramId<'info> {
     pub authority: Signer<'info>,
 }
 
-// ... 其他結構體保持不變 ...
+#[derive(Accounts)]
+pub struct GetPrice<'info> {
+    #[account(
+        seeds = [PriceOracle::DATA_SEED],
+        bump = data.bump,
+    )]
+    pub data: Account<'info, PriceOracleData>,
+}
+
+#[derive(Accounts)]
+pub struct GetApy<'info> {
+    #[account(
+        seeds = [PriceOracle::DATA_SEED],
+        bump = data.bump,
+    )]
+    pub data: Account<'info, PriceOracleData>,
+}
+
+#[derive(Accounts)]
+pub struct SetEmergencyStop<'info> {
+    #[account(
+        mut,
+        seeds = [PriceOracle::HEADER_SEED],
+        bump = header.bump,
+    )]
+    pub header: Account<'info, PriceOracleHeader>,
+    #[account(constraint = authority.key() == header.authority @ OracleError::UnauthorizedAccess)]
+    pub authority: Signer<'info>,
+}

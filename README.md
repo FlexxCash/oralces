@@ -31,6 +31,10 @@ Main dependencies and their versions (defined in Cargo.toml):
 - switchboard-v2 = "0.4.0"
 - serde = { version = "1.0", features = ["derive"] }
 - serde_json = "1.0"
+- bytemuck = "1.13.1"
+- rust_decimal = "1.26.1"
+- solana-program = { version = ">=1.16, <1.17" }
+- superslice = "1"
 
 ## File Descriptions
 
@@ -38,123 +42,70 @@ Main dependencies and their versions (defined in Cargo.toml):
 
 This is the main program entry point, defining instructions for interacting with the price oracle.
 
+#### Constants
+
+- `PRICE_CHANGE_THRESHOLD: f64 = 0.20` - Defines the maximum allowed price change (20%) before triggering a warning.
+
 #### Functions
 
-1. `initialize(ctx: Context<Initialize>) -> Result<()>`
-   - Purpose: Initializes the price oracle account.
-   - Parameters: `ctx` - Context containing accounts needed for initialization.
+1. `initialize(ctx: Context<Initialize>, switchboard_program_id: Pubkey) -> Result<()>`
+   - Purpose: Initializes the price oracle accounts.
+   - Parameters: 
+     - `ctx` - Context containing accounts needed for initialization.
+     - `switchboard_program_id` - The Pubkey of the Switchboard program.
    - Returns: `Ok(())` on success.
 
-2. `update_price(ctx: Context<UpdatePrice>, asset_type: AssetType) -> Result<()>`
-   - Purpose: Updates the price for a specified asset type.
+2. `update_price_and_apy(ctx: Context<UpdatePriceAndApy>, asset_type: AssetType) -> Result<()>`
+   - Purpose: Updates both the price and APY for a specified asset type.
    - Parameters:
-     - `ctx` - Context containing accounts needed for price update.
-     - `asset_type` - The type of asset to update the price for.
+     - `ctx` - Context containing accounts needed for update.
+     - `asset_type` - The type of asset to update.
    - Returns: `Ok(())` on success.
 
-3. `update_apy(ctx: Context<UpdateApy>, asset_type: AssetType) -> Result<()>`
-   - Purpose: Updates the APY for a specified asset type.
+3. `update_sol_price(ctx: Context<UpdateSolPrice>) -> Result<()>`
+   - Purpose: Updates the price for SOL.
    - Parameters:
-     - `ctx` - Context containing accounts needed for APY update.
-     - `asset_type` - The type of asset to update the APY for.
+     - `ctx` - Context containing accounts needed for SOL price update.
    - Returns: `Ok(())` on success.
 
-4. `get_current_price(ctx: Context<GetCurrentPrice>, asset_type: AssetType) -> Result<()>`
-   - Purpose: Retrieves the current price for a specified asset type.
+4. `update_switchboard_program_id(ctx: Context<UpdateSwitchboardProgramId>, new_program_id: Pubkey) -> Result<()>`
+   - Purpose: Updates the Switchboard program ID.
    - Parameters:
-     - `ctx` - Context containing accounts needed to get the price.
-     - `asset_type` - The type of asset to get the price for.
-   - Returns: `Ok(())` on success, logs the price.
-
-5. `get_current_apy(ctx: Context<GetCurrentApy>, asset_type: AssetType) -> Result<()>`
-   - Purpose: Retrieves the current APY for a specified asset type.
-   - Parameters:
-     - `ctx` - Context containing accounts needed to get the APY.
-     - `asset_type` - The type of asset to get the APY for.
-   - Returns: `Ok(())` on success, logs the APY.
-
-6. `get_sol_price(ctx: Context<GetSolPrice>) -> Result<()>`
-   - Purpose: Retrieves the current price of SOL.
-   - Parameters: `ctx` - Context containing accounts needed to get the SOL price.
-   - Returns: `Ok(())` on success, logs the SOL price.
-
-7. `get_usdc_price(_ctx: Context<GetUsdcPrice>) -> Result<()>`
-   - Purpose: Retrieves the current price of USDC (fixed at $1.00).
-   - Parameters: `_ctx` - Unused context parameter.
-   - Returns: `Ok(())` on success, logs the USDC price.
-
-8. `check_emergency_stop(ctx: Context<CheckEmergencyStop>) -> Result<()>`
-   - Purpose: Checks if the emergency stop is activated.
-   - Parameters: `ctx` - Context containing the price oracle account.
-   - Returns: `Ok(())` on success, logs the emergency stop status.
-
-9. `set_emergency_stop(ctx: Context<SetEmergencyStop>, stop: bool) -> Result<()>`
-   - Purpose: Sets the emergency stop status.
-   - Parameters:
-     - `ctx` - Context containing the price oracle account.
-     - `stop` - Boolean value to set the emergency stop status.
-   - Returns: `Ok(())` on success, logs the new emergency stop status.
+     - `ctx` - Context containing accounts needed for update.
+     - `new_program_id` - The new Switchboard program ID.
+   - Returns: `Ok(())` on success.
 
 #### Structs
 
 1. `Initialize<'info>`
    - Purpose: Defines accounts needed for initialization.
    - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account to initialize.
-     - `user: Signer<'info>` - The user initializing the account.
+     - `header: Account<'info, PriceOracleHeader>` - The price oracle header account.
+     - `data: Account<'info, PriceOracleData>` - The price oracle data account.
+     - `authority: Signer<'info>` - The authority initializing the accounts.
      - `system_program: Program<'info, System>` - The system program.
 
-2. `UpdatePrice<'info>`
-   - Purpose: Defines accounts needed for updating price.
+2. `UpdatePriceAndApy<'info>`
+   - Purpose: Defines accounts needed for updating price and APY.
    - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account.
+     - `header: Account<'info, PriceOracleHeader>` - The price oracle header account.
+     - `data: Account<'info, PriceOracleData>` - The price oracle data account.
      - `oracle_feed: AccountLoader<'info, AggregatorAccountData>` - The Switchboard oracle feed.
+     - `authority: Signer<'info>` - The authority allowed to update.
 
-3. `UpdateApy<'info>`
-   - Purpose: Defines accounts needed for updating APY.
+3. `UpdateSolPrice<'info>`
+   - Purpose: Defines accounts needed for updating SOL price.
    - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account.
+     - `header: Account<'info, PriceOracleHeader>` - The price oracle header account.
+     - `data: Account<'info, PriceOracleData>` - The price oracle data account.
      - `oracle_feed: AccountLoader<'info, AggregatorAccountData>` - The Switchboard oracle feed.
+     - `authority: Signer<'info>` - The authority allowed to update.
 
-4. `GetCurrentPrice<'info>`
-   - Purpose: Defines accounts needed for getting current price.
+4. `UpdateSwitchboardProgramId<'info>`
+   - Purpose: Defines accounts needed for updating Switchboard program ID.
    - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account.
-
-5. `GetCurrentApy<'info>`
-   - Purpose: Defines accounts needed for getting current APY.
-   - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account.
-
-6. `GetSolPrice<'info>`
-   - Purpose: Defines accounts needed for getting SOL price.
-   - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account.
-
-7. `GetUsdcPrice`
-   - Purpose: Defines accounts needed for getting USDC price (empty struct as USDC price is fixed).
-
-8. `CheckEmergencyStop<'info>`
-   - Purpose: Defines accounts needed for checking emergency stop status.
-   - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account.
-
-9. `SetEmergencyStop<'info>`
-   - Purpose: Defines accounts needed for setting emergency stop status.
-   - Fields:
-     - `price_oracle: Account<'info, PriceOracle>` - The price oracle account.
-     - `authority: Signer<'info>` - The authority allowed to set emergency stop.
-
-#### Error Codes
-
-`ErrorCode` enum defines possible error types:
-
-- `PriceChangeExceedsLimit` - Price change exceeds the allowed limit.
-- `OracleError` - An error occurred in the oracle.
-- `InvalidAssetType` - The asset type is invalid.
-- `PriceNotAvailable` - The price is not available.
-- `ApyNotAvailable` - The APY is not available.
-- `EmergencyStop` - The emergency stop is activated.
+     - `header: Account<'info, PriceOracleHeader>` - The price oracle header account.
+     - `authority: Signer<'info>` - The authority allowed to update.
 
 ### programs/oracles/src/price_oracle.rs
 
@@ -163,7 +114,7 @@ This file implements the core logic of the price oracle.
 #### Enums
 
 `AssetType` enum defines supported asset types:
-- JupSOL, MSOL, BSOL, HSOL, JitoSOL, VSOL, SOL
+- JupSOL, MSOL, VSOL, BSOL, HSOL, JitoSOL, SOL
 
 #### Structs
 
@@ -173,7 +124,6 @@ This file implements the core logic of the price oracle.
      - `price: f64` - Current price.
      - `last_price: f64` - Previous price.
      - `last_update_time: i64` - Timestamp of the last update.
-
      - `apy: f64` - Current APY.
 
 2. `PriceOracleHeader`
@@ -183,6 +133,7 @@ This file implements the core logic of the price oracle.
      - `last_global_update: i64` - Timestamp of the last global update.
      - `emergency_stop: bool` - Emergency stop flag.
      - `authority: Pubkey` - Authority public key.
+     - `switchboard_program_id: Pubkey` - Switchboard program ID.
      - `bump: u8` - PDA bump.
 
 3. `PriceOracleData`
@@ -194,85 +145,30 @@ This file implements the core logic of the price oracle.
 
 #### Functions
 
-1. `AssetType::get_feed_address(&self) -> Result<Pubkey>`
-   - Purpose: Gets the Switchboard feed address for a given asset type.
-   - Parameters: `self` - The AssetType instance.
-   - Returns: `Result<Pubkey>` - The Pubkey of the feed address or an error.
+1. `PriceOracle::initialize(...) -> Result<()>`
+   - Purpose: Initializes the PriceOracle accounts.
 
-2. `PriceOracle::initialize(&mut self) -> Result<()>`
-   - Purpose: Initializes the PriceOracle struct.
-   - Parameters: `self` - Mutable reference to the PriceOracle instance.
-   - Returns: `Result<()>` - Ok(()) on success.
+2. `PriceOracle::update_price_and_apy(...) -> Result<()>`
+   - Purpose: Updates both price and APY for a given asset type.
 
-3. `PriceOracle::update_price(&mut self, feed: &AccountLoader<AggregatorAccountData>, asset_type: AssetType, clock: &Clock) -> Result<()>`
-   - Purpose: Updates the price for a given asset type.
-   - Parameters:
-     - `self` - Mutable reference to the PriceOracle instance.
-     - `feed` - Reference to the Switchboard feed account.
-     - `asset_type` - The asset type to update.
-     - `clock` - Reference to the system clock.
-   - Returns: `Result<()>` - Ok(()) on success.
+3. `PriceOracle::update_sol_price(...) -> Result<()>`
+   - Purpose: Updates the SOL price.
 
-4. `PriceOracle::update_apy(&mut self, feed: &AccountLoader<AggregatorAccountData>, asset_type: AssetType, clock: &Clock) -> Result<()>`
-   - Purpose: Updates the APY for a given asset type.
-   - Parameters:
-     - `self` - Mutable reference to the PriceOracle instance.
-     - `feed` - Reference to the Switchboard feed account.
-     - `asset_type` - The asset type to update.
-     - `clock` - Reference to the system clock.
-   - Returns: `Result<()>` - Ok(()) on success.
-
-5. `PriceOracle::get_current_price(&self, asset_type: AssetType) -> Result<f64>`
+4. `PriceOracle::get_current_price(...) -> Result<f64>`
    - Purpose: Gets the current price for a given asset type.
-   - Parameters:
-     - `self` - Reference to the PriceOracle instance.
-     - `asset_type` - The asset type to get the price for.
-   - Returns: `Result<f64>` - The current price or an error.
 
-6. `PriceOracle::get_last_price(&self, asset_type: AssetType) -> Result<f64>`
-   - Purpose: Gets the last price for a given asset type.
-   - Parameters:
-     - `self` - Reference to the PriceOracle instance.
-     - `asset_type` - The asset type to get the last price for.
-   - Returns: `Result<f64>` - The last price or an error.
-
-7. `PriceOracle::get_current_apy(&self, asset_type: AssetType) -> Result<f64>`
+5. `PriceOracle::get_current_apy(...) -> Result<f64>`
    - Purpose: Gets the current APY for a given asset type.
-   - Parameters:
-     - `self` - Reference to the PriceOracle instance.
-     - `asset_type` - The asset type to get the APY for.
-   - Returns: `Result<f64>` - The current APY or an error.
 
-8. `PriceOracle::last_update_time(&self, asset_type: AssetType) -> Result<i64>`
-   - Purpose: Gets the last update time for a given asset type.
-   - Parameters:
-     - `self` - Reference to the PriceOracle instance.
-     - `asset_type` - The asset type to get the last update time for.
-   - Returns: `Result<i64>` - The last update timestamp or an error.
-
-9. `PriceOracle::is_emergency_stopped(&self) -> bool`
+6. `PriceOracle::is_emergency_stopped(...) -> bool`
    - Purpose: Checks if the emergency stop is activated.
-   - Parameters: `self` - Reference to the PriceOracle instance.
-   - Returns: `bool` - True if emergency stop is activated, false otherwise.
 
-10. `PriceOracle::set_emergency_stop(&mut self, stop: bool)`
-    - Purpose: Sets the emergency stop status.
-    - Parameters:
-      - `self` - Mutable reference to the PriceOracle instance.
-      - `stop` - Boolean value to set the emergency stop status.
-
-11. `convert_switchboard_decimal(decimal: SwitchboardDecimal) -> Result<f64>`
-    - Purpose: Converts a SwitchboardDecimal to an f64.
-    - Parameters: `decimal` - The SwitchboardDecimal to convert.
-    - Returns: `Result<f64>` - The converted f64 value or an error.
-12. `PriceOracle::get_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>) -> Result<f64>`
-    - Purpose: Gets the APY from a Switchboard feed.
-    - Parameters: `feed` - Reference to the Switchboard feed account.
-    - Returns: `Result<f64>` - The APY from the feed or an error.
+7. `PriceOracle::set_emergency_stop(...)`
+   - Purpose: Sets the emergency stop status.
 
 #### Error Codes
 
-`OracleError` enum defines possible error types specific to the oracle functionality:
+`OracleError` enum defines possible error types:
 
 - `UnauthorizedAccess` - Unauthorized access attempt.
 - `InvalidAssetType` - Invalid asset type.
@@ -288,6 +184,69 @@ This file implements the core logic of the price oracle.
 - `InvalidSwitchboardAccount` - Invalid Switchboard account.
 - `StaleData` - Data is stale.
 - `ExceedsConfidenceInterval` - Data exceeds the confidence interval.
+- `MaxAssetsReached` - Maximum number of assets reached.
+- `AssetNotFound` - Asset not found.
+- `InvalidIndex` - Invalid index.
+- `ClockUnavailable` - System clock is unavailable.
+- `InvalidSwitchboardProgram` - Invalid Switchboard program.
+- `InvalidSwitchboardData` - Invalid data from Switchboard.
+
+## Switchboard Data Format
+
+The Switchboard oracle provides price and APY data in the following format:
+
+```json
+{
+  "result": "81.14553583522887934",
+  "results": [
+    "163.582759",
+    "0.07883967045775868",
+    "162.212232",
+    "0.06710272249494009",
+    "181.854954",
+    "0.06659877596838777",
+    "191.787336",
+    "0.07353018328401717",
+    "162.237243",
+    "0.07424004899565666",
+    "179.229791",
+    "0.07153565738789942"
+  ],
+  "version": "RC_09_16_24_18_54"
+}
+```
+
+The "results" array contains price and APY data for different assets in the following order:
+1. JupSOL price
+2. JupSOL APY
+3. vSOL price
+4. vSOL APY
+5. bSOL price
+6. bSOL APY
+7. mSOL price
+8. mSOL APY
+9. HSOL price
+10. HSOL APY
+11. JitoSOL price
+12. JitoSOL APY
+
+For SOL price, a separate Switchboard feed is used with the following format:
+
+```json
+{
+  "result": "156.55828500000000000000000000",
+  "results": [
+    "156.56328000000000000000",
+    "task 21614352 panicked",
+    "157.19",
+    "156.55329000000000000000000000",
+    "156.527665650000000000000000"
+  ],
+  "version": "RC_09_16_24_18_54"
+}
+```
+
+The SOL price is taken from the "result" field in this case.
 
 ## Usage
 
@@ -302,62 +261,113 @@ This file implements the core logic of the price oracle.
 If you encounter errors related to missing Anchor macros or unable to find program files, try the following steps:
 
 1. Ensure your Solana CLI is on the correct network (localnet for testing):
-   ```
-   solana config set --url localhost
-   ```
 
-2. Check the Solana and Anchor versions:
+## Running Tests
+
+To run the tests for this project, follow these detailed steps:
+
+1. Ensure you have Solana CLI tools and Anchor installed on your system:
    ```
    solana --version
    anchor --version
    ```
-   Make sure they are compatible with each other and with your project.
+   If not installed, follow the official documentation to install them.
 
-3. If problems persist, try manually deleting the `target` directory and `.anchor` directory (if it exists) and rebuilding:
+2. Clone this repository and navigate to the project root directory:
    ```
-   rm -rf target
-   rm -rf .anchor
-   anchor build
+   git clone <repository-url>
+   cd flexxcash_bnpl
    ```
 
-## Notes
+3. Install project dependencies:
+   ```
+   npm install
+   ```
 
-- This program uses the Switchboard oracle to get real-time price and APY data.
-- USDC price is fixed at $1.00.
-- There's an emergency stop mechanism to prevent updates in case of abnormal conditions.
-- Price changes exceeding 20% will trigger an error to prevent abnormal fluctuations.
-- The `convert_switchboard_decimal` function is used to safely convert Switchboard's decimal representation to a standard f64 value.
+4. Ensure your Solana CLI is configured for local development:
+   ```
+   solana config set --url localhost
+   ```
 
-## Running Tests
+5. Start a local Solana test validator in a separate terminal window:
+   ```
+   solana-test-validator
+   ```
 
-To run the tests for this project, follow these steps:
-
-1. Ensure you have Solana CLI tools and Anchor installed on your system.
-
-2. Navigate to the project root directory (flexxcash_bnpl) in your terminal.
-
-3. Build the program:
+6. Build the Anchor program:
    ```
    anchor build
    ```
 
-4. Deploy the program to a local test validator:
+7. Deploy the program to the local test validator:
    ```
    anchor deploy
    ```
 
-5. Run the tests:
+8. Run the tests:
    ```
    anchor test
    ```
 
 This will execute all the tests defined in the `tests/price_oracle.ts` file.
 
-Note: Make sure you have a local Solana test validator running before executing the tests. If you encounter any issues, refer to the Troubleshooting section in this README.
+### Test Coverage
+
+The test suite in `tests/price_oracle.ts` covers the following scenarios:
+
+- Initialization of the price oracle
+- Updating price and APY for various asset types (JupSOL, VSOL, etc.)
+- Updating SOL price
+- Getting current price and APY for assets
+- Setting and checking emergency stop
+- Handling unauthorized access attempts
+- Updating multiple assets simultaneously
+- Updating Switchboard program ID
+
+These tests ensure that all major functionalities of the price oracle are working as expected, including edge cases and error handling.
+
+### Troubleshooting Test Issues
+
+If you encounter any issues while running the tests, try the following:
+
+1. Ensure the Solana test validator is running and responsive.
+
+2. If you get errors about account or program not found, try resetting the test validator and redeploying:
+   ```
+   solana-test-validator --reset
+   anchor deploy
+   ```
+
+3. Check that your Anchor.toml file has the correct program ID and cluster configuration.
+
+4. If you're getting TypeScript compilation errors, ensure your node_modules are up to date:
+   ```
+   npm install
+   ```
+
+5. For Anchor-specific errors, consult the Anchor documentation or try cleaning and rebuilding:
+   ```
+   anchor clean
+   anchor build
+   anchor deploy
+   ```
+
+6. If tests are failing due to timeout issues, you can increase the timeout in the test script within package.json.
+
+Remember to check the console output for specific error messages, which can provide clues about what might be going wrong.
+
+## Notes
+
+- This program uses the Switchboard oracle to get real-time price and APY data.
+- There's an emergency stop mechanism to prevent updates in case of abnormal conditions.
+- Price changes exceeding 20% will trigger a warning log.
+- The `convert_switchboard_decimal` function is used to safely convert Switchboard's decimal representation to a standard f64 value.
+- The program handles different data formats for regular assets and SOL price updates.
+- The test suite covers a wide range of scenarios, including updates for all supported asset types and error cases.
 
 ## Contributing
 
-Pull Requests are welcome to improve this project. Please ensure all tests pass before submitting.
+Pull Requests are welcome to improve this project. Please ensure all tests pass before submitting. When making changes, make sure to update or add relevant tests in the `tests/price_oracle.ts` file to maintain comprehensive test coverage.
 
 ## License
 

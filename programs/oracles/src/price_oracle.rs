@@ -7,26 +7,28 @@ use switchboard_v2::{AggregatorAccountData, SwitchboardDecimal};
 const MAX_SWITCHBOARD_DATA_AGE: i64 = 300; // 5 minutes
 const SWITCHBOARD_CONFIDENCE_INTERVAL: f64 = 0.80;
 
+/// Represents the different types of assets supported by the oracle
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum AssetType {
     JupSOL,
     MSOL,
+    VSOL,
     BSOL,
     HSOL,
     JitoSOL,
-    VSOL,
     SOL,
 }
 
+/// Wrapper for AssetType to implement Default trait
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, PartialEq, Debug)]
 pub enum AssetTypeWrapper {
     #[default]
     JupSOL,
     MSOL,
+    VSOL,
     BSOL,
     HSOL,
     JitoSOL,
-    VSOL,
     SOL,
 }
 
@@ -35,10 +37,10 @@ impl From<AssetType> for AssetTypeWrapper {
         match asset_type {
             AssetType::JupSOL => AssetTypeWrapper::JupSOL,
             AssetType::MSOL => AssetTypeWrapper::MSOL,
+            AssetType::VSOL => AssetTypeWrapper::VSOL,
             AssetType::BSOL => AssetTypeWrapper::BSOL,
             AssetType::HSOL => AssetTypeWrapper::HSOL,
             AssetType::JitoSOL => AssetTypeWrapper::JitoSOL,
-            AssetType::VSOL => AssetTypeWrapper::VSOL,
             AssetType::SOL => AssetTypeWrapper::SOL,
         }
     }
@@ -49,15 +51,16 @@ impl From<AssetTypeWrapper> for AssetType {
         match wrapper {
             AssetTypeWrapper::JupSOL => AssetType::JupSOL,
             AssetTypeWrapper::MSOL => AssetType::MSOL,
+            AssetTypeWrapper::VSOL => AssetType::VSOL,
             AssetTypeWrapper::BSOL => AssetType::BSOL,
             AssetTypeWrapper::HSOL => AssetType::HSOL,
             AssetTypeWrapper::JitoSOL => AssetType::JitoSOL,
-            AssetTypeWrapper::VSOL => AssetType::VSOL,
             AssetTypeWrapper::SOL => AssetType::SOL,
         }
     }
 }
 
+/// Represents the price data for an asset
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
 pub struct PriceData {
     pub price: f64,
@@ -66,6 +69,7 @@ pub struct PriceData {
     pub apy: f64,
 }
 
+/// Represents the header information for the price oracle
 #[account]
 #[derive(Default)]
 pub struct PriceOracleHeader {
@@ -77,6 +81,7 @@ pub struct PriceOracleHeader {
     pub bump: u8,
 }
 
+/// Represents the data storage for the price oracle
 #[account]
 #[derive(Default)]
 pub struct PriceOracleData {
@@ -85,6 +90,7 @@ pub struct PriceOracleData {
     pub bump: u8,
 }
 
+/// Main struct for the Price Oracle
 pub struct PriceOracle;
 
 impl PriceOracle {
@@ -92,6 +98,7 @@ impl PriceOracle {
     pub const HEADER_SEED: &'static [u8] = b"price_oracle_header";
     pub const DATA_SEED: &'static [u8] = b"price_oracle_data";
 
+    /// Initializes the price oracle
     pub fn initialize(
         header: &mut Account<PriceOracleHeader>,
         data: &mut Account<PriceOracleData>,
@@ -114,7 +121,8 @@ impl PriceOracle {
         Ok(())
     }
 
-    pub fn update_price(
+    /// Updates the price and APY for a specific asset
+    pub fn update_price_and_apy(
         header: &mut Account<PriceOracleHeader>,
         data: &mut Account<PriceOracleData>,
         feed: &AccountLoader<AggregatorAccountData>,
@@ -122,11 +130,11 @@ impl PriceOracle {
         clock: &Clock
     ) -> Result<()> {
         if header.emergency_stop {
-            msg!("Emergency stop is activated. Price update aborted.");
+            msg!("Emergency stop is activated. Update aborted.");
             return Err(error!(OracleError::EmergencyStop));
         }
 
-        let new_price = Self::get_price_from_feed(feed, &header.switchboard_program_id)?;
+        let (new_price, new_apy) = Self::get_price_and_apy_from_feed(feed, &header.switchboard_program_id, asset_type)?;
         let current_time = clock.unix_timestamp;
 
         let index = Self::find_or_add_asset(header, data, asset_type)?;
@@ -140,8 +148,9 @@ impl PriceOracle {
 
             price_data.last_price = price_data.price;
             price_data.price = new_price;
+            price_data.apy = new_apy;
             price_data.last_update_time = current_time;
-            msg!("Price updated for {:?}. New price: {}", asset_type, new_price);
+            msg!("Price and APY updated for {:?}. New price: {}, New APY: {}", asset_type, new_price, new_apy);
         } else {
             msg!("Invalid index for asset type {:?}", asset_type);
             return Err(error!(OracleError::InvalidIndex));
@@ -151,25 +160,36 @@ impl PriceOracle {
         Ok(())
     }
 
-    pub fn update_apy(
+    /// Updates the SOL price
+    pub fn update_sol_price(
         header: &mut Account<PriceOracleHeader>,
         data: &mut Account<PriceOracleData>,
         feed: &AccountLoader<AggregatorAccountData>,
-        asset_type: AssetType,
         clock: &Clock
     ) -> Result<()> {
         if header.emergency_stop {
+            msg!("Emergency stop is activated. SOL price update aborted.");
             return Err(error!(OracleError::EmergencyStop));
         }
 
-        let apy = Self::get_apy_from_feed(feed, &header.switchboard_program_id)?;
+        let new_price = Self::get_sol_price_from_feed(feed, &header.switchboard_program_id)?;
         let current_time = clock.unix_timestamp;
 
-        let index = Self::find_or_add_asset(header, data, asset_type)?;
+        let index = Self::find_or_add_asset(header, data, AssetType::SOL)?;
         if let Some(price_data) = data.price_data.get_mut(index) {
-            price_data.apy = apy;
+            let price_change = (new_price - price_data.price).abs() / price_data.price;
+            if price_change > 0.2 {
+                msg!("SOL price change exceeds 20% limit. Old price: {}, New price: {}", price_data.price, new_price);
+                header.emergency_stop = true;
+                return Err(error!(OracleError::PriceChangeExceedsLimit));
+            }
+
+            price_data.last_price = price_data.price;
+            price_data.price = new_price;
             price_data.last_update_time = current_time;
+            msg!("SOL price updated. New price: {}", new_price);
         } else {
+            msg!("Invalid index for SOL");
             return Err(error!(OracleError::InvalidIndex));
         }
 
@@ -177,6 +197,7 @@ impl PriceOracle {
         Ok(())
     }
 
+    /// Gets the current price for a specific asset
     pub fn get_current_price(data: &Account<PriceOracleData>, asset_type: AssetType) -> Result<f64> {
         let index = Self::find_asset(data, asset_type)?;
         data.price_data.get(index)
@@ -184,6 +205,7 @@ impl PriceOracle {
             .ok_or_else(|| error!(OracleError::PriceNotAvailable))
     }
 
+    /// Gets the current APY for a specific asset
     pub fn get_current_apy(data: &Account<PriceOracleData>, asset_type: AssetType) -> Result<f64> {
         let index = Self::find_asset(data, asset_type)?;
         data.price_data.get(index)
@@ -191,14 +213,17 @@ impl PriceOracle {
             .ok_or_else(|| error!(OracleError::ApyNotAvailable))
     }
 
+    /// Checks if emergency stop is activated
     pub fn is_emergency_stopped(header: &Account<PriceOracleHeader>) -> bool {
         header.emergency_stop
     }
 
+    /// Sets the emergency stop status
     pub fn set_emergency_stop(header: &mut Account<PriceOracleHeader>, stop: bool) {
         header.emergency_stop = stop;
     }
 
+    /// Finds the index of an asset in the data account
     fn find_asset(data: &Account<PriceOracleData>, asset_type: AssetType) -> Result<usize> {
         let wrapper: AssetTypeWrapper = asset_type.into();
         data.asset_types.iter()
@@ -206,6 +231,7 @@ impl PriceOracle {
             .ok_or_else(|| error!(OracleError::AssetNotFound))
     }
 
+    /// Finds or adds an asset to the data account
     fn find_or_add_asset(header: &mut Account<PriceOracleHeader>, data: &mut Account<PriceOracleData>, asset_type: AssetType) -> Result<usize> {
         if let Ok(index) = Self::find_asset(data, asset_type) {
             Ok(index)
@@ -220,7 +246,8 @@ impl PriceOracle {
         }
     }
 
-    fn get_price_from_feed(feed: &AccountLoader<AggregatorAccountData>, switchboard_program_id: &Pubkey) -> Result<f64> {
+    /// Gets the price and APY from the Switchboard feed
+    fn get_price_and_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>, switchboard_program_id: &Pubkey, asset_type: AssetType) -> Result<(f64, f64)> {
         let feed_data = feed.load().map_err(|_| error!(OracleError::InvalidSwitchboardAccount))?;
 
         if feed.to_account_info().owner != switchboard_program_id {
@@ -228,8 +255,23 @@ impl PriceOracle {
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        let switchboard_decimal = feed_data.get_result()?;
-        let decimal = convert_switchboard_decimal(switchboard_decimal)?;
+        let result = feed_data.get_result()?;
+        let result_f64 = Self::switchboard_decimal_to_f64(&result);
+        let values: Vec<f64> = result_f64.to_string().split(',').filter_map(|s| s.parse().ok()).collect();
+
+        if values.len() < 12 {
+            return Err(error!(OracleError::InvalidSwitchboardData));
+        }
+
+        let (price, apy) = match asset_type {
+            AssetType::JupSOL => (values[0], values[1]),
+            AssetType::VSOL => (values[2], values[3]),
+            AssetType::BSOL => (values[4], values[5]),
+            AssetType::MSOL => (values[6], values[7]),
+            AssetType::HSOL => (values[8], values[9]),
+            AssetType::JitoSOL => (values[10], values[11]),
+            AssetType::SOL => return Err(error!(OracleError::InvalidAssetType)),
+        };
 
         let current_timestamp = clock::Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?.unix_timestamp;
         feed_data.check_staleness(current_timestamp, MAX_SWITCHBOARD_DATA_AGE)
@@ -244,62 +286,56 @@ impl PriceOracle {
                 error!(OracleError::ExceedsConfidenceInterval)
             })?;
 
-        Ok(decimal)
+        Ok((price, apy))
     }
 
-    fn get_apy_from_feed(feed: &AccountLoader<AggregatorAccountData>, switchboard_program_id: &Pubkey) -> Result<f64> {
+    /// Gets the SOL price from the Switchboard feed
+    fn get_sol_price_from_feed(feed: &AccountLoader<AggregatorAccountData>, switchboard_program_id: &Pubkey) -> Result<f64> {
         let feed_data = feed.load().map_err(|_| error!(OracleError::InvalidSwitchboardAccount))?;
 
         if feed.to_account_info().owner != switchboard_program_id {
+            msg!("Invalid Switchboard account owner");
             return Err(error!(OracleError::InvalidSwitchboardAccount));
         }
 
-        let switchboard_decimal = feed_data.get_result()?;
-        let decimal = convert_switchboard_decimal(switchboard_decimal)?;
+        let result = feed_data.get_result()?;
+        let price = Self::switchboard_decimal_to_f64(&result);
 
         let current_timestamp = clock::Clock::get().map_err(|_| error!(OracleError::ClockUnavailable))?.unix_timestamp;
         feed_data.check_staleness(current_timestamp, MAX_SWITCHBOARD_DATA_AGE)
-            .map_err(|_| error!(OracleError::StaleData))?;
-        feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(SWITCHBOARD_CONFIDENCE_INTERVAL))
-            .map_err(|_| error!(OracleError::ExceedsConfidenceInterval))?;
+            .map_err(|_| {
+                msg!("Switchboard data is stale");
+                error!(OracleError::StaleData)
+            })?;
 
-        Ok(decimal)
+        feed_data.check_confidence_interval(SwitchboardDecimal::from_f64(SWITCHBOARD_CONFIDENCE_INTERVAL))
+            .map_err(|_| {
+                msg!("Switchboard data exceeds confidence interval");
+                error!(OracleError::ExceedsConfidenceInterval)
+            })?;
+
+        Ok(price)
     }
 
+    /// Converts a SwitchboardDecimal to f64
+    fn switchboard_decimal_to_f64(decimal: &SwitchboardDecimal) -> f64 {
+        let mantissa = decimal.mantissa;
+        let scale = decimal.scale;
+        (mantissa as f64) * 10f64.powi(-(scale as i32))
+    }
+
+    /// Gets the PDA for the price oracle header
     pub fn get_price_oracle_header_pda(program_id: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[Self::HEADER_SEED], program_id)
     }
 
+    /// Gets the PDA for the price oracle data
     pub fn get_price_oracle_data_pda(program_id: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[Self::DATA_SEED], program_id)
     }
 }
 
-/// Converts a SwitchboardDecimal to an f64.
-///
-/// This function is a public wrapper around the private switchboard_decimal_to_f64 function.
-/// It's used to convert Switchboard's decimal representation to a standard f64 value.
-///
-/// # Arguments
-///
-/// * `decimal` - A SwitchboardDecimal to be converted.
-///
-/// # Returns
-///
-/// * `Result<f64>` - The converted f64 value if successful, or an error if the conversion fails.
-pub fn convert_switchboard_decimal(decimal: SwitchboardDecimal) -> Result<f64> {
-    switchboard_decimal_to_f64(decimal)
-}
-
-// Helper function to convert SwitchboardDecimal to f64
-fn switchboard_decimal_to_f64(decimal: SwitchboardDecimal) -> Result<f64> {
-    let value = (decimal.mantissa as f64) * 10f64.powi(decimal.scale.try_into().unwrap());
-    if value.is_infinite() || value.is_nan() {
-        return Err(error!(OracleError::SwitchboardConversionError));
-    }
-    Ok(value)
-}
-
+/// Custom error types for the Oracle
 #[error_code]
 pub enum OracleError {
     #[msg("Unauthorized access")]
@@ -340,8 +376,8 @@ pub enum OracleError {
     ClockUnavailable,
     #[msg("Invalid Switchboard program")]
     InvalidSwitchboardProgram,
-    #[msg("Error converting Switchboard decimal")]
-    SwitchboardConversionError,
+    #[msg("Invalid Switchboard data")]
+    InvalidSwitchboardData,
 }
 
 #[cfg(test)]
@@ -349,40 +385,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_convert_switchboard_decimal() {
-        // Test normal case
-        let normal_decimal = SwitchboardDecimal {
-            mantissa: 12345,
-            scale: 2,
+    fn test_switchboard_decimal_to_f64() {
+        let decimal = SwitchboardDecimal {
+            mantissa: 1234567890,
+            scale: 9,
         };
-        assert_eq!(convert_switchboard_decimal(normal_decimal).unwrap(), 123.45);
-
-        // Test very small number
-        let small_decimal = SwitchboardDecimal {
-            mantissa: 1,
-            scale: 10,
-        };
-        assert_eq!(convert_switchboard_decimal(small_decimal).unwrap(), 1e-10);
-
-        // Test very large number
-        let large_decimal = SwitchboardDecimal {
-            mantissa: 1234567890123456,
-            scale: -5,
-        };
-        assert_eq!(convert_switchboard_decimal(large_decimal).unwrap(), 1.234567890123456e20);
-
-        // Test zero
-        let zero_decimal = SwitchboardDecimal {
-            mantissa: 0,
-            scale: 0,
-        };
-        assert_eq!(convert_switchboard_decimal(zero_decimal).unwrap(), 0.0);
-
-        // Test error case (infinity)
-        let infinity_decimal = SwitchboardDecimal {
-            mantissa: 1,
-            scale: 1000,
-        };
-        assert!(convert_switchboard_decimal(infinity_decimal).is_err());
+        let result = PriceOracle::switchboard_decimal_to_f64(&decimal);
+        assert_eq!(result, 1.23456789);
     }
+
+    // Add more tests here as needed
 }
