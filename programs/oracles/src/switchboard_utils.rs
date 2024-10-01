@@ -5,6 +5,7 @@ use crate::price_oracle::OracleError;
 
 pub const DEVNET_AGGREGATOR_PUBKEY: &str = "4NiWaTuje7SVe9DN1vfnX7m1qBC7DnUxwRxbdgEDUGX1";
 pub const SOL_PRICE_AGGREGATOR_PUBKEY: &str = "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR";
+pub const DEFAULT_DEVNET_QUEUE: &str = "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7";
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct SwitchboardResult {
@@ -64,7 +65,20 @@ pub fn get_multi_asset_result(
 pub fn get_sol_price(
     switchboard_feed: &AccountLoader<AggregatorAccountData>,
 ) -> Result<SwitchboardResult> {
-    get_switchboard_result(switchboard_feed)
+    let feed = switchboard_feed.load().map_err(|e| {
+        msg!("Failed to load Switchboard feed for SOL price: {:?}", e);
+        Error::from(OracleError::InvalidAccountData)
+    })?;
+
+    let result = feed.get_result().map_err(|e| {
+        msg!("Failed to get result from Switchboard feed for SOL price: {:?}", e);
+        Error::from(OracleError::InvalidAccountData)
+    })?;
+
+    parse_sol_price(&result).map_err(|e| {
+        msg!("Failed to parse SOL price: {:?}", e);
+        Error::from(OracleError::InvalidSwitchboardData)
+    })
 }
 
 fn switchboard_decimal_to_result(decimal: &SwitchboardDecimal) -> std::result::Result<SwitchboardResult, OracleError> {
@@ -80,6 +94,24 @@ fn switchboard_decimal_to_result(decimal: &SwitchboardDecimal) -> std::result::R
         msg!("Switchboard result is not a finite number: mantissa={}, scale={}", mantissa, scale);
         Err(OracleError::InvalidSwitchboardData)
     }
+}
+
+fn parse_sol_price(decimal: &SwitchboardDecimal) -> std::result::Result<SwitchboardResult, OracleError> {
+    let result_str = switchboard_decimal_to_string(decimal)?;
+    
+    // Parse the JSON string
+    let json: serde_json::Value = serde_json::from_str(&result_str)
+        .map_err(|_| OracleError::InvalidSwitchboardData)?;
+    
+    // Extract the "result" field
+    let result = json["result"].as_str()
+        .ok_or(OracleError::InvalidSwitchboardData)?;
+    
+    // Parse the result as f64
+    let value = result.parse::<f64>()
+        .map_err(|_| OracleError::InvalidSwitchboardData)?;
+    
+    Ok(SwitchboardResult { value })
 }
 
 fn parse_multi_asset_data(decimal: &SwitchboardDecimal) -> std::result::Result<MultiAssetResult, OracleError> {
@@ -145,5 +177,15 @@ mod tests {
         let result = parse_multi_asset_data(&decimal).unwrap();
         assert_eq!(result.prices.len(), 6);
         assert_eq!(result.apys.len(), 6);
+    }
+
+    #[test]
+    fn test_parse_sol_price() {
+        let decimal = SwitchboardDecimal {
+            mantissa: 15610523850000000000000000000,
+            scale: 26,
+        };
+        let result = parse_sol_price(&decimal).unwrap();
+        assert_eq!(result.value, 156.10523850000000000000000000);
     }
 }

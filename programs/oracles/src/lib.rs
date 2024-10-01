@@ -9,7 +9,7 @@ pub mod switchboard_utils;
 use price_oracle::{AssetType, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError};
 use switchboard_utils::{DEVNET_AGGREGATOR_PUBKEY, SOL_PRICE_AGGREGATOR_PUBKEY};
 
-declare_id!("2GMr62U6cYmwgYjGCV5LGkRfECohppeWFMtZwmUkqr2F");
+declare_id!("GqYaWFTAy3dTNZ8zRb9EyWLqTQ4gRHUUwCCuD5GmRihY");
 
 #[program]
 pub mod oracles {

@@ -26,7 +26,7 @@ describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const programId = new anchor.web3.PublicKey("2GMr62U6cYmwgYjGCV5LGkRfECohppeWFMtZwmUkqr2F");
+  const programId = new anchor.web3.PublicKey("GqYaWFTAy3dTNZ8zRb9EyWLqTQ4gRHUUwCCuD5GmRihY");
   const program = anchor.workspace.Oracles as Program<any>;
 
   let priceOracleHeaderPda: anchor.web3.PublicKey;
@@ -92,10 +92,12 @@ describe("price_oracle", () => {
         .rpc();
 
       const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
-      assert.equal(dataAccount.priceData.length, 6, "Should have updated 6 assets");
+      assert.equal(dataAccount.priceData.length, 7, "Should have updated 7 assets (6 + SOL)");
       dataAccount.priceData.forEach((data, index) => {
-        assert.isTrue(data.price > 0, `Asset ${index} price should be greater than 0`);
-        assert.isTrue(data.apy > 0, `Asset ${index} APY should be greater than 0`);
+        if (index < 6) {
+          assert.isTrue(data.price > 0, `Asset ${index} price should be greater than 0`);
+          assert.isTrue(data.apy > 0, `Asset ${index} APY should be greater than 0`);
+        }
       });
     } catch (error) {
       console.error("Error updating prices and APYs for all assets:", error);
@@ -105,6 +107,9 @@ describe("price_oracle", () => {
 
   it("Updates SOL price", async () => {
     try {
+      const beforeUpdate = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
+      const beforeSolPrice = beforeUpdate.priceData[6].price;
+
       await program.methods.updateSolPrice()
         .accounts({
           header: priceOracleHeaderPda,
@@ -114,10 +119,14 @@ describe("price_oracle", () => {
         })
         .rpc();
 
-      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
-      const solData = dataAccount.priceData[6]; // SOL is the last element
-      assert.isNotNull(solData, "SOL data should not be null");
-      assert.isTrue(solData.price > 0, "SOL price should be greater than 0");
+      const afterUpdate = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
+      const afterSolPrice = afterUpdate.priceData[6].price;
+
+      assert.isNotNull(afterSolPrice, "SOL price should not be null");
+      assert.isTrue(afterSolPrice > 0, "SOL price should be greater than 0");
+      assert.notEqual(beforeSolPrice, afterSolPrice, "SOL price should have changed");
+      
+      console.log(`SOL price updated from ${beforeSolPrice} to ${afterSolPrice}`);
     } catch (error) {
       console.error("Error updating SOL price:", error);
       throw error;
@@ -136,6 +145,22 @@ describe("price_oracle", () => {
       assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current price for JupSOL:")), "Transaction logs should include current price for JupSOL");
     } catch (error) {
       console.error("Error getting current price for JupSOL:", error);
+      throw error;
+    }
+  });
+
+  it("Gets current price for SOL", async () => {
+    try {
+      const tx = await program.methods.getCurrentPrice({ sol: {} })
+        .accounts({
+          data: priceOracleDataPda,
+        })
+        .rpc();
+
+      const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
+      assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current price for SOL:")), "Transaction logs should include current price for SOL");
+    } catch (error) {
+      console.error("Error getting current price for SOL:", error);
       throw error;
     }
   });
@@ -180,6 +205,23 @@ describe("price_oracle", () => {
           header: priceOracleHeaderPda,
           data: priceOracleDataPda,
           oracleFeed: oracleFeed,
+          authority: provider.wallet.publicKey,
+        })
+        .rpc();
+
+      assert.fail("Should have thrown an error");
+    } catch (error) {
+      assert.include(error.toString(), "Emergency stop activated");
+    }
+  });
+
+  it("Fails to update SOL price when emergency stop is active", async () => {
+    try {
+      await program.methods.updateSolPrice()
+        .accounts({
+          header: priceOracleHeaderPda,
+          data: priceOracleDataPda,
+          oracleFeed: solOracleFeed,
           authority: provider.wallet.publicKey,
         })
         .rpc();
