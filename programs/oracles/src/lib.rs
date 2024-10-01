@@ -5,11 +5,13 @@ use switchboard_v2::AggregatorAccountData;
 
 pub mod price_oracle;
 pub mod switchboard_utils;
+pub mod config;
 
 use price_oracle::{AssetType, PriceOracle, PriceOracleHeader, PriceOracleData, OracleError};
 use switchboard_utils::{DEVNET_AGGREGATOR_PUBKEY, SOL_PRICE_AGGREGATOR_PUBKEY};
+use config::*;
 
-declare_id!("2GMr62U6cYmwgYjGCV5LGkRfECohppeWFMtZwmUkqr2F");
+declare_id!("2JiSGehxLoLjxnX9hDrXtbEYxRk9N17McMNNKTPn6L4i");
 
 #[program]
 pub mod oracles {
@@ -31,9 +33,13 @@ pub mod oracles {
 
     pub fn update_prices_and_apys(ctx: Context<UpdatePricesAndApys>) -> Result<()> {
         sol_log_compute_units();
-        msg!("Updating prices and APYs for all assets");
+        let clock = Clock::get()?;
+        msg!("Updating prices and APYs. Current timestamp: {}", clock.unix_timestamp);
 
-        let clock = Clock::get().unwrap();
+        if ctx.accounts.header.emergency_stop {
+            msg!("Emergency stop is activated. Update aborted.");
+            return Err(error!(OracleError::EmergencyStop));
+        }
 
         // Validate Switchboard program ID
         if ctx.accounts.oracle_feed.to_account_info().owner != &ctx.accounts.header.switchboard_program_id {
@@ -57,9 +63,13 @@ pub mod oracles {
 
     pub fn update_sol_price(ctx: Context<UpdateSolPrice>) -> Result<()> {
         sol_log_compute_units();
-        msg!("Updating SOL price");
+        let clock = Clock::get()?;
+        msg!("Updating SOL price. Current timestamp: {}", clock.unix_timestamp);
 
-        let clock = Clock::get().unwrap();
+        if ctx.accounts.header.emergency_stop {
+            msg!("Emergency stop is activated. SOL price update aborted.");
+            return Err(error!(OracleError::EmergencyStop));
+        }
 
         // Validate Switchboard program ID
         if ctx.accounts.oracle_feed.to_account_info().owner != &ctx.accounts.header.switchboard_program_id {
@@ -96,6 +106,12 @@ pub mod oracles {
     pub fn set_emergency_stop(ctx: Context<SetEmergencyStop>, stop: bool) -> Result<()> {
         PriceOracle::set_emergency_stop(&mut ctx.accounts.header, stop);
         msg!("Emergency stop set to: {}", stop);
+        Ok(())
+    }
+
+    pub fn update_switchboard_program_id(ctx: Context<UpdateSwitchboardProgramId>, new_program_id: Pubkey) -> Result<()> {
+        ctx.accounts.header.switchboard_program_id = new_program_id;
+        msg!("Switchboard program ID updated to: {}", new_program_id);
         Ok(())
     }
 }
@@ -187,6 +203,18 @@ pub struct GetApy<'info> {
 
 #[derive(Accounts)]
 pub struct SetEmergencyStop<'info> {
+    #[account(
+        mut,
+        seeds = [PriceOracle::HEADER_SEED],
+        bump = header.bump,
+    )]
+    pub header: Account<'info, PriceOracleHeader>,
+    #[account(constraint = authority.key() == header.authority @ OracleError::UnauthorizedAccess)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateSwitchboardProgramId<'info> {
     #[account(
         mut,
         seeds = [PriceOracle::HEADER_SEED],

@@ -1,12 +1,9 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock;
+use anchor_lang::solana_program::clock::Clock;
 use std::convert::TryInto;
 use switchboard_v2::AggregatorAccountData;
-use crate::switchboard_utils::{get_multi_asset_result, get_sol_price, MultiAssetResult, SwitchboardResult, DEVNET_AGGREGATOR_PUBKEY, SOL_PRICE_AGGREGATOR_PUBKEY};
-
-// Define constants
-const MAX_SWITCHBOARD_DATA_AGE: i64 = 300; // 5 minutes
-const PRICE_CHANGE_LIMIT: f64 = 0.20; // 20%
+use crate::switchboard_utils::{get_multi_asset_result, get_sol_price, MultiAssetResult, SwitchboardResult};
+use crate::config::*;
 
 /// Represents the different types of assets supported by the oracle
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -73,6 +70,7 @@ impl PriceOracle {
         data.price_data = core::array::from_fn(|_| PriceData::default());
         data.bump = data_bump;
 
+        msg!("Price oracle initialized with authority: {}", authority.key());
         Ok(())
     }
 
@@ -99,22 +97,11 @@ impl PriceOracle {
             let new_price = multi_asset_result.prices[i];
             let new_apy = multi_asset_result.apys[i];
 
-            let price_data = &mut data.price_data[i];
-            let price_change = (new_price - price_data.price).abs() / price_data.price;
-            if price_change > PRICE_CHANGE_LIMIT {
-                msg!("Price change exceeds 20% limit for {:?}. Old price: {}, New price: {}", asset_type, price_data.price, new_price);
-                header.emergency_stop = true;
-                return Err(error!(OracleError::PriceChangeExceedsLimit));
-            }
-
-            price_data.last_price = price_data.price;
-            price_data.price = new_price;
-            price_data.apy = new_apy;
-            price_data.last_update_time = current_time;
-            msg!("Price and APY updated for {:?}. New price: {}, New APY: {}", asset_type, new_price, new_apy);
+            Self::update_single_asset_price(data, i, new_price, new_apy, current_time)?;
         }
 
         header.last_global_update = current_time;
+        msg!("All prices and APYs updated successfully at timestamp: {}", current_time);
         Ok(())
     }
 
@@ -134,20 +121,36 @@ impl PriceOracle {
         let new_price = sol_price_result.value;
         let current_time = clock.unix_timestamp;
 
-        let price_data = &mut data.price_data[6]; // SOL is the last element
+        Self::update_single_asset_price(data, 6, new_price, 0.0, current_time)?; // SOL is the last element, APY is not applicable
+
+        header.last_global_update = current_time;
+        msg!("SOL price updated successfully. New price: {}", new_price);
+        Ok(())
+    }
+
+    /// Helper function to update a single asset's price and APY
+    fn update_single_asset_price(
+        data: &mut Account<PriceOracleData>,
+        index: usize,
+        new_price: f64,
+        new_apy: f64,
+        current_time: i64,
+    ) -> Result<()> {
+        let price_data = &mut data.price_data[index];
         let price_change = (new_price - price_data.price).abs() / price_data.price;
+        
         if price_change > PRICE_CHANGE_LIMIT {
-            msg!("SOL price change exceeds 20% limit. Old price: {}, New price: {}", price_data.price, new_price);
-            header.emergency_stop = true;
+            msg!("Price change exceeds {}% limit for asset index {}. Old price: {}, New price: {}", 
+                PRICE_CHANGE_LIMIT * 100.0, index, price_data.price, new_price);
             return Err(error!(OracleError::PriceChangeExceedsLimit));
         }
 
         price_data.last_price = price_data.price;
         price_data.price = new_price;
+        price_data.apy = new_apy;
         price_data.last_update_time = current_time;
-        msg!("SOL price updated. New price: {}", new_price);
 
-        header.last_global_update = current_time;
+        msg!("Price and APY updated for asset index {}. New price: {}, New APY: {}", index, new_price, new_apy);
         Ok(())
     }
 
@@ -175,6 +178,7 @@ impl PriceOracle {
     /// Sets the emergency stop status
     pub fn set_emergency_stop(header: &mut Account<PriceOracleHeader>, stop: bool) {
         header.emergency_stop = stop;
+        msg!("Emergency stop set to: {}", stop);
     }
 
     /// Gets the PDA for the price oracle header
@@ -203,7 +207,7 @@ pub enum OracleError {
     PriceNotAvailable,
     #[msg("APY not available")]
     ApyNotAvailable,
-    #[msg("Price change exceeds 20% limit")]
+    #[msg("Price change exceeds limit")]
     PriceChangeExceedsLimit,
     #[msg("Emergency stop activated")]
     EmergencyStop,

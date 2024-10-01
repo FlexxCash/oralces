@@ -64,7 +64,23 @@ pub fn get_multi_asset_result(
 pub fn get_sol_price(
     switchboard_feed: &AccountLoader<AggregatorAccountData>,
 ) -> Result<SwitchboardResult> {
-    get_switchboard_result(switchboard_feed)
+    let feed = switchboard_feed.load().map_err(|e| {
+        msg!("Failed to load Switchboard feed: {:?}", e);
+        Error::from(OracleError::InvalidAccountData)
+    })?;
+
+    let result = feed.get_result().map_err(|e| {
+        msg!("Failed to get result from Switchboard feed: {:?}", e);
+        Error::from(OracleError::InvalidAccountData)
+    })?;
+
+    let result_str = switchboard_decimal_to_string(&result)?;
+    let value: f64 = result_str.parse().map_err(|_| {
+        msg!("Failed to parse SOL price: {}", result_str);
+        Error::from(OracleError::InvalidSwitchboardData)
+    })?;
+
+    Ok(SwitchboardResult::new(value))
 }
 
 fn switchboard_decimal_to_result(decimal: &SwitchboardDecimal) -> std::result::Result<SwitchboardResult, OracleError> {
@@ -90,6 +106,7 @@ fn parse_multi_asset_data(decimal: &SwitchboardDecimal) -> std::result::Result<M
         .collect();
 
     if values.len() != 12 {
+        msg!("Invalid number of values in multi-asset data: expected 12, got {}", values.len());
         return Err(OracleError::InvalidSwitchboardData);
     }
 
@@ -112,6 +129,7 @@ fn switchboard_decimal_to_string(decimal: &SwitchboardDecimal) -> std::result::R
     if value.is_finite() {
         Ok(value.to_string())
     } else {
+        msg!("Invalid Switchboard decimal: mantissa={}, scale={}", mantissa, scale);
         Err(OracleError::InvalidSwitchboardData)
     }
 }
