@@ -2,9 +2,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { assert } from "chai";
 
-// 添加 PriceOracleHeader 和 PriceOracleData 的類型定義
 interface PriceOracleHeader {
-  assetCount: number;
   lastGlobalUpdate: anchor.BN;
   emergencyStop: boolean;
   authority: anchor.web3.PublicKey;
@@ -21,7 +19,6 @@ interface PriceData {
 
 interface PriceOracleData {
   priceData: PriceData[];
-  assetTypes: { [key: string]: {} }[];
   bump: number;
 }
 
@@ -29,7 +26,7 @@ describe("price_oracle", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const programId = new anchor.web3.PublicKey("9rK2cdpDThj5s3qa4W6FA7D4E3gnXjVxBTgen8FypMUj");
+  const programId = new anchor.web3.PublicKey("2GMr62U6cYmwgYjGCV5LGkRfECohppeWFMtZwmUkqr2F");
   const program = anchor.workspace.Oracles as Program<any>;
 
   let priceOracleHeaderPda: anchor.web3.PublicKey;
@@ -76,8 +73,6 @@ describe("price_oracle", () => {
       const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
       assert.isNotNull(headerAccount, "Header account should not be null");
       assert.isNotNull(dataAccount, "Data account should not be null");
-      assert.isEmpty(dataAccount.priceData, "Price data should be empty");
-      assert.isEmpty(dataAccount.assetTypes, "Asset types should be empty");
       assert.equal(headerAccount.switchboardProgramId.toBase58(), switchboardProgram.toBase58(), "Switchboard program ID should match");
     } catch (error) {
       console.error("Error initializing price oracle:", error);
@@ -85,9 +80,9 @@ describe("price_oracle", () => {
     }
   });
 
-  it("Updates price and APY for JupSOL", async () => {
+  it("Updates prices and APYs for all assets", async () => {
     try {
-      await program.methods.updatePriceAndApy({ jupSol: {} })
+      await program.methods.updatePricesAndApys()
         .accounts({
           header: priceOracleHeaderPda,
           data: priceOracleDataPda,
@@ -97,34 +92,13 @@ describe("price_oracle", () => {
         .rpc();
 
       const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
-      const jupSolData = dataAccount.priceData[dataAccount.assetTypes.findIndex(at => 'jupSol' in at)];
-      assert.isNotNull(jupSolData, "JupSOL data should not be null");
-      assert.isTrue(jupSolData.price > 0, "JupSOL price should be greater than 0");
-      assert.isTrue(jupSolData.apy > 0, "JupSOL APY should be greater than 0");
+      assert.equal(dataAccount.priceData.length, 6, "Should have updated 6 assets");
+      dataAccount.priceData.forEach((data, index) => {
+        assert.isTrue(data.price > 0, `Asset ${index} price should be greater than 0`);
+        assert.isTrue(data.apy > 0, `Asset ${index} APY should be greater than 0`);
+      });
     } catch (error) {
-      console.error("Error updating price and APY for JupSOL:", error);
-      throw error;
-    }
-  });
-
-  it("Updates price and APY for VSOL", async () => {
-    try {
-      await program.methods.updatePriceAndApy({ vSol: {} })
-        .accounts({
-          header: priceOracleHeaderPda,
-          data: priceOracleDataPda,
-          oracleFeed: oracleFeed,
-          authority: provider.wallet.publicKey,
-        })
-        .rpc();
-
-      const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
-      const vSolData = dataAccount.priceData[dataAccount.assetTypes.findIndex(at => 'vSol' in at)];
-      assert.isNotNull(vSolData, "VSOL data should not be null");
-      assert.isTrue(vSolData.price > 0, "VSOL price should be greater than 0");
-      assert.isTrue(vSolData.apy > 0, "VSOL APY should be greater than 0");
-    } catch (error) {
-      console.error("Error updating price and APY for VSOL:", error);
+      console.error("Error updating prices and APYs for all assets:", error);
       throw error;
     }
   });
@@ -141,7 +115,7 @@ describe("price_oracle", () => {
         .rpc();
 
       const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
-      const solData = dataAccount.priceData[dataAccount.assetTypes.findIndex(at => 'sol' in at)];
+      const solData = dataAccount.priceData[6]; // SOL is the last element
       assert.isNotNull(solData, "SOL data should not be null");
       assert.isTrue(solData.price > 0, "SOL price should be greater than 0");
     } catch (error) {
@@ -182,22 +156,6 @@ describe("price_oracle", () => {
     }
   });
 
-  it("Gets SOL price", async () => {
-    try {
-      const tx = await program.methods.getCurrentPrice({ sol: {} })
-        .accounts({
-          data: priceOracleDataPda,
-        })
-        .rpc();
-
-      const txLogs = await provider.connection.getTransaction(tx, { commitment: 'confirmed' });
-      assert.isTrue(txLogs.meta.logMessages.some(log => log.includes("Current price for SOL:")), "Transaction logs should include current SOL price");
-    } catch (error) {
-      console.error("Error getting SOL price:", error);
-      throw error;
-    }
-  });
-
   it("Sets and checks emergency stop", async () => {
     try {
       await program.methods.setEmergencyStop(true)
@@ -215,9 +173,9 @@ describe("price_oracle", () => {
     }
   });
 
-  it("Fails to update price and APY when emergency stop is active", async () => {
+  it("Fails to update prices and APYs when emergency stop is active", async () => {
     try {
-      await program.methods.updatePriceAndApy({ jupSol: {} })
+      await program.methods.updatePricesAndApys()
         .accounts({
           header: priceOracleHeaderPda,
           data: priceOracleDataPda,
@@ -232,10 +190,10 @@ describe("price_oracle", () => {
     }
   });
 
-  it("Fails to update price and APY with unauthorized user", async () => {
+  it("Fails to update prices and APYs with unauthorized user", async () => {
     const unauthorizedUser = anchor.web3.Keypair.generate();
     try {
-      await program.methods.updatePriceAndApy({ jupSol: {} })
+      await program.methods.updatePricesAndApys()
         .accounts({
           header: priceOracleHeaderPda,
           data: priceOracleDataPda,
@@ -249,31 +207,6 @@ describe("price_oracle", () => {
     } catch (error) {
       assert.include(error.toString(), "Unauthorized access");
     }
-  });
-
-  it("Updates price and APY for multiple assets", async () => {
-    // 首先關閉緊急停止
-    await program.methods.setEmergencyStop(false)
-      .accounts({
-        header: priceOracleHeaderPda,
-        authority: provider.wallet.publicKey,
-      })
-      .rpc();
-
-    const assets = [{ mSol: {} }, { bSol: {} }, { hSol: {} }, { vSol: {} }, { jitoSol: {} }];
-    for (const asset of assets) {
-      await program.methods.updatePriceAndApy(asset)
-        .accounts({
-          header: priceOracleHeaderPda,
-          data: priceOracleDataPda,
-          oracleFeed: oracleFeed,
-          authority: provider.wallet.publicKey,
-        })
-        .rpc();
-    }
-
-    const dataAccount = await program.account.priceOracleData.fetch(priceOracleDataPda) as PriceOracleData;
-    assert.isAtLeast(dataAccount.assetTypes.length, assets.length, "Should have updated all new assets");
   });
 
   it("Updates Switchboard program ID", async () => {

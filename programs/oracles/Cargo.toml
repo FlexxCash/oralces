@@ -6,6 +6,13 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "lib"]
 
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
 [dependencies]
 anchor-lang = { version = "0.28.0", features = ["init-if-needed"] }
 anchor-spl = "0.28.0"
@@ -15,4 +22,7 @@ serde_json = "1.0"
 bytemuck = "1.13.1"
 rust_decimal = "1.26.1"
 solana-program = { version = ">=1.16, <1.17" }
-superslice = "1"
+
+[dev-dependencies]
+solana-program-test = { version = ">=1.16, <1.17" }
+solana-sdk = { version = ">=1.16, <1.17" }
